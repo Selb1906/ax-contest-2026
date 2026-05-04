@@ -1,4 +1,4 @@
-"""안심구역 대화형 실행기 — 메뉴에서 선택만 하면 됨.
+"""안심구역 대화형 실행기 — 1~4명 팀 병렬 작업 지원.
 
 사용법:
   python run.py
@@ -11,7 +11,6 @@ from pathlib import Path
 
 
 def ask(prompt, options=None, default=None):
-    """사용자 입력 받기."""
     if options:
         print(f"\n  {prompt}")
         for i, opt in enumerate(options, 1):
@@ -34,12 +33,123 @@ def ask(prompt, options=None, default=None):
 
 
 def run_cmd(cmd):
-    """명령어 실행."""
     print(f"\n{'='*60}")
     print(f"실행: {cmd}")
     print(f"{'='*60}\n")
-    result = subprocess.run(cmd, shell=True)
-    return result.returncode
+    return subprocess.run(cmd, shell=True).returncode
+
+
+# ── 팀 작업 분배 ──
+
+TEAM_PLANS = {
+    1: {
+        "description": "1명 — 전체 파이프라인 순차 실행",
+        "roles": {
+            "PC 1": [
+                "0. LP 구조 탐색 (inspect_lp)",
+                "1. 전체 파이프라인 (Step 1~12 자동)",
+            ],
+        },
+    },
+    2: {
+        "description": "2명 — 메인 파이프라인 + Ablation 병렬",
+        "roles": {
+            "PC 1 (메인)": [
+                "0. LP 구조 탐색 → source_dsz.yaml 생성 (공유)",
+                "1. 전체 파이프라인 Step 1~9 (--skip-shap으로 빠르게)",
+                "→ Step 9 완료 후 PC 2에 weights/ 전달",
+                "6. SHAP 분석 (Step 6 단독)",
+                "   결과를 explain_results/에 저장",
+            ],
+            "PC 2 (Ablation)": [
+                "※ PC 1이 Step 5 완료 후 시작 (weights/ 필요)",
+                "5. Ablation Study",
+                "6. 하이퍼파라미터 튜닝 (남은 시간)",
+                "7. Sliding 상세 평가 (최적 모델로)",
+            ],
+        },
+    },
+    3: {
+        "description": "3명 — 메인 + Ablation + BTM/기상 병렬",
+        "roles": {
+            "PC 1 (메인)": [
+                "0. LP 구조 탐색 → yaml 공유",
+                "1. Step 1~5 (학습까지)",
+                "→ weights/ + features/ 를 PC 2,3에 공유",
+                "   Step 5.5 Sliding 평가",
+                "   Step 6 SHAP 분석",
+            ],
+            "PC 2 (Ablation)": [
+                "※ PC 1의 Step 5 완료 대기",
+                "5. Ablation Study (BTM/기상/기준온도/피처)",
+                "6. 하이퍼파라미터 튜닝",
+                "→ 최적 설정 ablation_results/에 저장",
+            ],
+            "PC 3 (BTM + 기상)": [
+                "2. BTM 전략 비교 (A/B/C) — 별도 상세 분석",
+                "3. 기상 버전 비교 (6+가지)",
+                "4. 피처 선택 실험",
+                "→ 결과를 btm_results/, weather_opt/에 저장",
+            ],
+        },
+    },
+    4: {
+        "description": "4명 — 최대 병렬",
+        "roles": {
+            "PC 1 (메인)": [
+                "0. LP 구조 탐색 → yaml 공유",
+                "1. Step 1~5 (학습까지)",
+                "→ weights/ 공유",
+                "   Step 5.5 Sliding 평가",
+            ],
+            "PC 2 (Ablation)": [
+                "※ PC 1의 Step 5 완료 대기",
+                "5. Ablation Study",
+                "→ 최적 설정 확정 후 재학습",
+            ],
+            "PC 3 (분석)": [
+                "6. SHAP 분석",
+                "4. 피처 선택 실험",
+                "3. 기상 버전 비교",
+                "→ explain_results/, feature_selection/ 저장",
+            ],
+            "PC 4 (BTM + 튜닝)": [
+                "2. BTM 전략 비교",
+                "   BTM 태양광 발전량 예측 모델 작업 (btm_solar.py)",
+                "6. 하이퍼파라미터 튜닝 (남은 시간)",
+            ],
+        },
+    },
+}
+
+
+def show_team_plan(n_members, source, train_end):
+    plan = TEAM_PLANS[n_members]
+    print(f"""
+╔══════════════════════════════════════════════════════╗
+║  팀 작업 분배 — {plan['description']:40s}║
+╚══════════════════════════════════════════════════════╝
+
+  소스: {source}
+  학습 종료: {train_end}
+""")
+    for role, tasks in plan["roles"].items():
+        print(f"  ┌─ {role}")
+        for task in tasks:
+            print(f"  │  {task}")
+        print(f"  └{'─'*50}")
+
+    print(f"""
+  공유 방법:
+    - source_dsz.yaml: PC 1이 생성 → USB or 동일 경로에 복사
+    - weights/: PC 1이 Step 5 완료 후 다른 PC에 복사
+    - 결과물: 각 PC에서 해당 디렉터리에 저장 → 마지막에 합치기
+
+  주의:
+    - 모든 PC에 동일한 코드(git clone)가 있어야 함
+    - 데이터 경로(source_dsz.yaml)가 동일해야 함
+    - weights/를 공유받기 전에 Ablation/튜닝 실행 불가
+""")
 
 
 def main():
@@ -58,6 +168,15 @@ def main():
 
     source = ask("데이터 소스 선택:", config_names, config_names[0])
     train_end = ask("학습 종료 기간 (예: 2023-12):", default="2023-12")
+
+    # 팀 모드
+    n_members = int(ask("작업 인원 (1~4):", default="1"))
+    n_members = max(1, min(4, n_members))
+    show_team_plan(n_members, source, train_end)
+
+    if n_members > 1:
+        my_role = ask("내 역할:", list(TEAM_PLANS[n_members]["roles"].keys()))
+        print(f"\n  → {my_role} 작업을 시작합니다.")
 
     print(f"\n  소스: {source}")
     print(f"  학습 종료: {train_end}")
@@ -80,6 +199,7 @@ def main():
 │  9. 베이스라인 평가                               │
 │  10. 대시보드 실행 (Streamlit)                    │
 │                                                  │
+│  t. 팀 작업 분배 다시 보기                        │
 │  s. 소스/기간 변경                                │
 │  q. 종료                                          │
 └──────────────────────────────────────────────────┘""")
@@ -89,17 +209,17 @@ def main():
         if choice == "q":
             print("\n  종료합니다.")
             break
-
+        elif choice == "t":
+            show_team_plan(n_members, source, train_end)
+            continue
         elif choice == "s":
             source = ask("데이터 소스:", config_names, source)
             train_end = ask("학습 종료 기간:", default=train_end)
-            print(f"\n  변경됨: {source} / {train_end}")
             continue
 
         elif choice == "0":
-            lp_path = ask("LP 데이터 경로 (파일 또는 디렉터리):", default="/path/to/lp")
+            lp_path = ask("LP 데이터 경로:", default="/path/to/lp")
             run_cmd(f'python -m scripts.inspect_lp --path "{lp_path}"')
-
         elif choice == "1":
             resume = ask("이전 체크포인트에서 이어서?", ["새로 실행", "이어서 실행"], "새로 실행")
             skip_profile = ask("프로파일러 스킵?", ["아니오", "예"], "아니오")
@@ -112,40 +232,30 @@ def main():
             if skip_shap == "예":
                 cmd += " --skip-shap"
             run_cmd(cmd)
-
         elif choice == "2":
             run_cmd(f'python -m scripts.compare_btm_strategies --source {source} --train-end {train_end}')
-
         elif choice == "3":
             run_cmd(f'python -m scripts.compare_weather_versions --source {source} --train-end {train_end}')
-
         elif choice == "4":
             corr_th = ask("상관 임계값:", default="0.85")
             vif_th = ask("VIF 임계값:", default="10.0")
             run_cmd(f'python -m scripts.select_features --source {source} --train-end {train_end} --corr-threshold {corr_th} --vif-threshold {vif_th}')
-
         elif choice == "5":
             run_cmd(f'python -m scripts.ablation_study --source {source} --train-end {train_end}')
-
         elif choice == "6":
             timeout = ask("튜닝 제한 시간 (초):", default="600")
             n_trials = ask("최대 시도 횟수:", default="100")
             run_cmd(f'python -m scripts.tune_lgbm --source {source} --train-end {train_end} --timeout {timeout} --n-trials {n_trials}')
-
         elif choice == "7":
             weights = ask("모델 가중치 경로:", default="weights/dsz_lgbm/")
             run_cmd(f'python -m scripts.predict_batch --source {source} --weights {weights}')
-
         elif choice == "8":
             run_cmd(f'python -m scripts.profile --source {source}')
-
         elif choice == "9":
             run_cmd(f'python -m scripts.run_baselines --source {source}')
-
         elif choice == "10":
             port = ask("포트:", default="8765")
             run_cmd(f'python -m streamlit run ui/app.py --server.port {port}')
-
         else:
             print("  올바른 번호를 입력하세요")
 

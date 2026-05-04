@@ -507,6 +507,141 @@ ui/app.py (Streamlit 4탭 대시보드)
 configs/ (YAML 설정)
 data/weather/ (ASOS 가중평균 5버전 + 8개 스테이션)</div>
 
+<!-- ===== 팀 작업 분배 ===== -->
+<h2>팀 작업 분배 (1~4명)</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  안심구역에서 <strong>여러 PC로 병렬 작업</strong>이 가능합니다. <code>python run.py</code> 실행 시 작업 인원을 선택하면
+  역할 분배가 표시됩니다. 핵심: <strong>PC 1이 Step 5(학습)를 완료해야 다른 PC가 Ablation/튜닝 시작 가능</strong>.
+</p>
+
+<table>
+  <tr><th>인원</th><th>PC 1 (메인)</th><th>PC 2</th><th>PC 3</th><th>PC 4</th></tr>
+  <tr>
+    <td><strong>1명</strong></td>
+    <td>전체 파이프라인 (Step 1~12)</td>
+    <td>—</td><td>—</td><td>—</td>
+  </tr>
+  <tr>
+    <td><strong>2명</strong></td>
+    <td>Step 1~9 + SHAP</td>
+    <td>Ablation + 튜닝</td>
+    <td>—</td><td>—</td>
+  </tr>
+  <tr>
+    <td><strong>3명</strong></td>
+    <td>Step 1~5 + Sliding + SHAP</td>
+    <td>Ablation + 튜닝</td>
+    <td>BTM비교 + 기상비교 + 피처선택</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>4명</strong></td>
+    <td>Step 1~5 + Sliding</td>
+    <td>Ablation + 재학습</td>
+    <td>SHAP + 피처선택 + 기상비교</td>
+    <td>BTM + btm_solar + 튜닝</td>
+  </tr>
+</table>
+
+<div class="desc">공유 필요: source_dsz.yaml (PC 1 → 전체), weights/ (PC 1 → PC 2,3,4)</div>
+
+<!-- ===== TODO ===== -->
+<h2>미완료 작업 (TODO)</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  현재 코드가 <strong>대부분 완성</strong>되어 있지만, 아래 항목은 추가 작업이 필요합니다.
+</p>
+
+<table>
+  <tr><th>항목</th><th>상태</th><th>담당</th><th>내용</th></tr>
+  <tr>
+    <td style="color:#d63031;font-weight:600;">BTM 발전량 예측 모델</td>
+    <td><span class="badge b-red">설계만</span></td>
+    <td>팀원 (BTM 담당)</td>
+    <td>
+      <code>src/models/btm_solar.py</code>에 골격만 있음.<br>
+      전력거래소 "자가용 태양광 출력 추계" 데이터를 받아서<br>
+      기상→BTM 발전량 예측 모델을 학습해야 함.<br>
+      현재 BTM 탐지(btm_detect.py)는 완료 — btm_score 피처 투입 동작함.
+    </td>
+  </tr>
+  <tr>
+    <td style="color:#e17055;font-weight:600;">ASOS 가중평균 검증</td>
+    <td><span class="badge b-orange">미검증</span></td>
+    <td>안심구역에서</td>
+    <td>
+      현재 논문 기반 가중치로 5개 버전 + LP역산/계절별 CSV 생성 완료.<br>
+      <strong>실 LP와 매칭하여 어떤 가중치가 최적인지는 안심구역에서 확인 필요.</strong>
+    </td>
+  </tr>
+  <tr>
+    <td style="color:#e17055;font-weight:600;">CDH vs CDD 비교</td>
+    <td><span class="badge b-orange">미검증</span></td>
+    <td>안심구역에서</td>
+    <td>
+      CDH(시간별 합산)가 CDD(일평균)보다 부하 상관이 높을 것이라는 가설.<br>
+      실 LP에서 corr(CDH, load) vs corr(CDD, load) 비교 필요.
+    </td>
+  </tr>
+  <tr>
+    <td style="color:#e17055;font-weight:600;">HDD/CDD 기준온도 최적</td>
+    <td><span class="badge b-orange">미검증</span></td>
+    <td>안심구역에서</td>
+    <td>
+      기본값 HDD=15°C, CDD=24°C. 실 LP에서 계약종별 최적 탐색 필요.<br>
+      Step 7(OLS 그리드)에서 자동 탐색 → Ablation에서 LightGBM 정밀 확인.
+    </td>
+  </tr>
+  <tr>
+    <td>검침일 확인</td>
+    <td><span class="badge b-gray">대기</span></td>
+    <td>안심구역에서</td>
+    <td>
+      LP 데이터에 검침일 컬럼이 있는지, 고객마다 다른지 확인.<br>
+      있으면 <code>meter_day</code> 파라미터로 설정. 없으면 캘린더 월 기준.
+    </td>
+  </tr>
+  <tr>
+    <td>세대수·계약전력 활용</td>
+    <td><span class="badge b-gray">대기</span></td>
+    <td>안심구역에서</td>
+    <td>
+      LP에 세대수/계약전력 컬럼이 있으면 자동 감지 → 피처로 투입.<br>
+      <code>inspect_lp.py</code>가 자동 탐지.
+    </td>
+  </tr>
+  <tr>
+    <td>요금 환산 검증</td>
+    <td><span class="badge b-gray">대기</span></td>
+    <td>안심구역에서</td>
+    <td>
+      계약종별 세부 구분(갑/을, 저압/고압)이 데이터에 있는지 확인.<br>
+      있으면 tariff.py가 자동 매칭. 없으면 기본값(일반용(을) 고압A) 사용.
+    </td>
+  </tr>
+  <tr>
+    <td>보고서 작성</td>
+    <td><span class="badge b-gray">미작성</span></td>
+    <td>전원</td>
+    <td>
+      .hwp 양식에 분석 결과 채우기. 프로파일러·SHAP·Ablation 결과를 보고서 각 섹션에 반영.<br>
+      서류 초안: <code>docs/dsz_documents_draft.md</code>
+    </td>
+  </tr>
+</table>
+
+<!-- ===== 안심구역 당일 체크리스트 ===== -->
+<h2>안심구역 방문 당일 체크리스트</h2>
+
+<table>
+  <tr><th>순서</th><th>작업</th><th>예상 시간</th><th>비고</th></tr>
+  <tr><td>1</td><td>USB 반입 + 환경 세팅 (<code>pip install --find-links wheels/</code>)</td><td>30분</td><td>패키지 설치 실패 시 requirements.txt 참고</td></tr>
+  <tr><td>2</td><td><code>python -m scripts.inspect_lp --path /data/</code></td><td>5분</td><td>LP 구조 확인 + yaml 자동 생성</td></tr>
+  <tr><td>3</td><td>yaml 검토 + 수정 (컬럼명, 시간형식, 검침일)</td><td>10분</td><td>inspect 결과에서 경고 확인</td></tr>
+  <tr><td>4</td><td><code>python run.py</code> → 작업 인원 선택 → 1번 실행</td><td>2~3시간</td><td>체크포인트 자동 저장</td></tr>
+  <tr><td>5</td><td>결과 확인 + 반출 신청서 작성</td><td>30분</td><td>반출 대상 디렉터리 확인</td></tr>
+  <tr><td>6</td><td>결과 USB 복사 + 반출 승인</td><td>30분</td><td>MANIFEST.json 심사자에게 제출</td></tr>
+</table>
+
 <div style="margin-top:32px; padding-bottom:200px; color:#999; font-size:0.75rem; text-align:center;">
   AX 경진대회 2026 — 한국전력공사 지정과제 · 전기요금 과다발생 사전 예측모델 개발
 </div>
