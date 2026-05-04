@@ -151,11 +151,14 @@ def run_single_experiment(df, config, train_end):
     if len(test_features) == 0:
         return None
 
-    all_errors = []
+    # Sliding: 검침일별 × horizon별 분리 수집
+    records_10 = []  # (y_true, y_pred) for +10일
+    records_20 = []  # (y_true, y_pred) for +20일
+
     for md in SLIDING_METER_DAYS:
         try:
-            horizon = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
-            ctx = ev.attach_alarm_context(horizon, monthly)
+            horizon_tbl = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
+            ctx = ev.attach_alarm_context(horizon_tbl, monthly)
             pred_vals = booster.predict(test_features[spec.all], num_iteration=booster.best_iteration)
             pred_df = test_features[["customer_id", "year_month", "horizon_days"]].copy()
             pred_df["pred_monthly_kwh"] = pred_vals
@@ -163,45 +166,52 @@ def run_single_experiment(df, config, train_end):
             merged = ctx.merge(pred_df, on=["customer_id", "year_month", "horizon_days"], how="inner")
             if len(merged) == 0:
                 continue
-            errors = np.abs(merged["pred_monthly_kwh"].values - merged["full_month_kwh"].values)
-            pct_errors = errors / merged["full_month_kwh"].clip(lower=1e-9).values * 100
-            all_errors.extend(pct_errors.tolist())
+
+            for h in [10, 20]:
+                sub = merged[merged["horizon_days"] == h]
+                if len(sub) == 0:
+                    continue
+                pairs = list(zip(sub["full_month_kwh"].tolist(), sub["pred_monthly_kwh"].tolist()))
+                if h == 10:
+                    records_10.extend(pairs)
+                else:
+                    records_20.extend(pairs)
         except Exception:
             pass
 
-    if not all_errors:
+    if not records_10 and not records_20:
         return None
 
-    all_errors = np.array(all_errors)
-    y_true_all = []
-    y_pred_all = []
-    # 전체 regression metrics도 산출
-    for md in SLIDING_METER_DAYS:
-        try:
-            horizon = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
-            ctx = ev.attach_alarm_context(horizon, monthly)
-            pred_vals = booster.predict(test_features[spec.all], num_iteration=booster.best_iteration)
-            pred_df = test_features[["customer_id", "year_month", "horizon_days"]].copy()
-            pred_df["pred_monthly_kwh"] = pred_vals
-            merged = ctx.merge(pred_df, on=["customer_id", "year_month", "horizon_days"], how="inner")
-            if len(merged) > 0:
-                y_true_all.extend(merged["full_month_kwh"].tolist())
-                y_pred_all.extend(merged["pred_monthly_kwh"].tolist())
-        except Exception:
-            pass
+    def _metrics(pairs):
+        if not pairs:
+            return {}
+        yt = np.array([p[0] for p in pairs])
+        yp = np.array([p[1] for p in pairs])
+        return regression_metrics(yt, yp)
 
-    reg = regression_metrics(np.array(y_true_all), np.array(y_pred_all))
+    reg_10 = _metrics(records_10)
+    reg_20 = _metrics(records_20)
+    reg_all = _metrics(records_10 + records_20)
 
     return {
         "name": config.name,
         "config": config.describe(),
-        "mape_mean": float(reg.get("mape_pct", np.nan)),
-        "nrmse_pct": float(reg.get("nrmse_pct", np.nan)),
-        "rmse": float(reg.get("rmse", np.nan)),
-        "mae": float(reg.get("mae", np.nan)),
-        "bias": float(reg.get("bias", np.nan)),
-        "std_error": float(reg.get("std_error", np.nan)),
-        "n_test": int(reg.get("n", 0)),
+        # +10일 (메인)
+        "mape_10d": float(reg_10.get("mape_pct", np.nan)),
+        "nrmse_10d": float(reg_10.get("nrmse_pct", np.nan)),
+        "rmse_10d": float(reg_10.get("rmse", np.nan)),
+        "n_10d": int(reg_10.get("n", 0)),
+        # +20일 (메인)
+        "mape_20d": float(reg_20.get("mape_pct", np.nan)),
+        "nrmse_20d": float(reg_20.get("nrmse_pct", np.nan)),
+        "rmse_20d": float(reg_20.get("rmse", np.nan)),
+        "n_20d": int(reg_20.get("n", 0)),
+        # 종합 (참고)
+        "mape_all": float(reg_all.get("mape_pct", np.nan)),
+        "nrmse_all": float(reg_all.get("nrmse_pct", np.nan)),
+        "bias_all": float(reg_all.get("bias", np.nan)),
+        "std_error_all": float(reg_all.get("std_error", np.nan)),
+        "n_all": int(reg_all.get("n", 0)),
         "n_sliding_days": len(SLIDING_METER_DAYS),
     }
 
@@ -246,8 +256,8 @@ def main() -> int:
     r = run_single_experiment(df_default, default, train_end)
     if r:
         all_results.append(r)
-        print(f"  기준선 MAPE: {r['mape_mean']:.3f}%")
-        baseline_mape = r["mape_mean"]
+        print(f"  기준선 MAPE: {r['mape_10d']:.3f}%")
+        baseline_mape = r["mape_10d"]
     else:
         print("  기본값 실험 실패")
         return 1
@@ -271,10 +281,10 @@ def main() -> int:
             r = run_single_experiment(df_exp, cfg, train_end)
             if r:
                 all_results.append(r)
-                delta = r["mape_mean"] - baseline_mape
-                print(f"    btm={mode}: MAPE {r['mape_mean']:.3f}% ({delta:+.3f}%)")
-                if r["mape_mean"] < btm_best[1]:
-                    btm_best = (mode, r["mape_mean"])
+                delta = r["mape_10d"] - baseline_mape
+                print(f"    btm={mode}: +10d {r['mape_10d']:.3f}% +20d {r['mape_20d']:.3f}% (delta {delta:+.3f}%)")
+                if r["mape_10d"] < btm_best[1]:
+                    btm_best = (mode, r["mape_10d"])
         best_per_factor["btm_mode"] = btm_best[0]
         print(f"    최적: btm={btm_best[0]}")
     else:
@@ -300,11 +310,11 @@ def main() -> int:
             r = run_single_experiment(df_exp, cfg, train_end)
             if r:
                 all_results.append(r)
-                delta = r["mape_mean"] - baseline_mape
+                delta = r["mape_10d"] - baseline_mape
                 tag = " (LP역산)" if "regression" in wv else " (계절별)" if "seasonal" in wv else ""
-                print(f"    weather={wv}{tag}: MAPE {r['mape_mean']:.3f}% ({delta:+.3f}%)")
-                if r["mape_mean"] < weather_best[1]:
-                    weather_best = (wv, r["mape_mean"])
+                print(f"    weather={wv}{tag}: MAPE {r['mape_10d']:.3f}% ({delta:+.3f}%)")
+                if r["mape_10d"] < weather_best[1]:
+                    weather_best = (wv, r["mape_10d"])
         best_per_factor["weather_version"] = weather_best[0]
         print(f"    최적: weather={weather_best[0]}")
     else:
@@ -350,10 +360,10 @@ def main() -> int:
         r = run_single_experiment(df_exp, cfg, train_end)
         if r:
             all_results.append(r)
-            delta = r["mape_mean"] - baseline_mape
-            print(f"    base={hdd_b}/{cdd_b}: MAPE {r['mape_mean']:.3f}% ({delta:+.3f}%)")
-            if r["mape_mean"] < base_best[2]:
-                base_best = (hdd_b, cdd_b, r["mape_mean"])
+            delta = r["mape_10d"] - baseline_mape
+            print(f"    base={hdd_b}/{cdd_b}: MAPE {r['mape_10d']:.3f}% ({delta:+.3f}%)")
+            if r["mape_10d"] < base_best[2]:
+                base_best = (hdd_b, cdd_b, r["mape_10d"])
     best_per_factor["hdd_base"] = base_best[0]
     best_per_factor["cdd_base"] = base_best[1]
     print(f"    최적: base={base_best[0]}/{base_best[1]}")
@@ -365,9 +375,9 @@ def main() -> int:
     r = run_single_experiment(df_exp, cfg, train_end)
     if r:
         all_results.append(r)
-        delta = r["mape_mean"] - baseline_mape
-        print(f"    feat_sel=True: MAPE {r['mape_mean']:.3f}% ({delta:+.3f}%)")
-        best_per_factor["feature_selection"] = r["mape_mean"] < baseline_mape
+        delta = r["mape_10d"] - baseline_mape
+        print(f"    feat_sel=True: MAPE {r['mape_10d']:.3f}% ({delta:+.3f}%)")
+        best_per_factor["feature_selection"] = r["mape_10d"] < baseline_mape
     else:
         best_per_factor["feature_selection"] = False
 
@@ -437,7 +447,7 @@ def main() -> int:
                     })
                     all_results.append({
                         "name": f"drop_{group_name}", "config": f"remove {group_name}",
-                        "mape_mean": mape_drop, "f1_mean": float(m["alarm_f1"].mean()),
+                        "mape_10d": mape_drop, "f1_mean": float(m["alarm_f1"].mean()),
                         "n_test": int(m["n"].sum()),
                     })
             except Exception as e:
@@ -472,18 +482,18 @@ def main() -> int:
     r_opt = run_single_experiment(df_opt, optimal, train_end)
     if r_opt:
         all_results.append(r_opt)
-        improvement = baseline_mape - r_opt["mape_mean"]
+        improvement = baseline_mape - r_opt["mape_10d"]
         print(f"  최적 조합 MAPE: {r_opt['mape_mean']:.3f}%")
         print(f"  기본 대비 개선: {improvement:+.3f}% ({improvement/baseline_mape*100:.1f}%)")
 
     # 결과 저장
-    results_df = pd.DataFrame(all_results).sort_values("mape_mean")
+    results_df = pd.DataFrame(all_results).sort_values("mape_10d")
     save_dataframe(results_df, OUT_DIR, "ablation_results", "Ablation Study 전체 결과")
 
     with open(OUT_DIR / "best_config.json", "w", encoding="utf-8") as f:
         json.dump({
             "baseline_mape": baseline_mape,
-            "optimal_mape": r_opt["mape_mean"] if r_opt else None,
+            "optimal_mape": r_opt["mape_10d"] if r_opt else None,
             "best_per_factor": best_per_factor,
             "optimal_config": optimal.describe(),
         }, f, ensure_ascii=False, indent=2, default=str)
