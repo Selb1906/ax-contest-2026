@@ -388,7 +388,7 @@ def main() -> int:
                     test_opt[c] = test_opt[c].astype("category")
 
             opt_sliding = []
-            for md in [1, 5, 10, 15, 20, 25]:
+            for md in range(1, 29):
                 try:
                     h_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
                     ctx_md = ev.attach_alarm_context(h_md, monthly)
@@ -455,7 +455,7 @@ def main() -> int:
                         test_tuned[c] = test_tuned[c].astype("category")
 
                 tuned_sliding = []
-                for md in [1, 5, 10, 15, 20, 25]:
+                for md in range(1, 29):
                     try:
                         h_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
                         ctx_md = ev.attach_alarm_context(h_md, monthly)

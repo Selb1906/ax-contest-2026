@@ -33,8 +33,8 @@ def main() -> int:
     parser.add_argument("--source", required=True)
     parser.add_argument("--train-end", required=True)
     parser.add_argument("--weights", default="weights/dsz_lgbm/")
-    parser.add_argument("--meter-days", default="1,5,10,15,20,25",
-                        help="검침일 목록 (쉼표 구분, 기본: 1,5,10,15,20,25)")
+    parser.add_argument("--meter-days", default=",".join(str(i) for i in range(1, 29)),
+                        help="검침일 목록 (쉼표 구분, 기본: 1~28)")
     args = parser.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

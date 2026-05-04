@@ -97,7 +97,7 @@ def attach_weather(horizon, config):
     return horizon
 
 
-SLIDING_METER_DAYS = [1, 5, 10, 15, 20, 25]
+SLIDING_METER_DAYS = list(range(1, 29))
 
 
 def run_single_experiment(df, config, train_end):
