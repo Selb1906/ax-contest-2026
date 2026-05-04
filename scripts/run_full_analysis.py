@@ -317,24 +317,6 @@ def main() -> int:
                 prog.update(label=f"민감도 실패: {e}")
 
     # ────────────────────────────────────────────
-    # STEP 9: 스케일 아웃
-    # ────────────────────────────────────────────
-    with ckpt.step("step9_scale", skip_if_done=skip_done) as prog:
-        try:
-            from src.scale import estimate_scale_metrics
-            scale_metrics = estimate_scale_metrics(df)
-            cur = scale_metrics["current"]
-            prog.update(label=f"현재: {cur['n_customers']:,}호, {cur['memory_mb']:.0f}MB")
-            for target, proj in scale_metrics["projections"].items():
-                prog.update(label=f"{target}: ~{proj['estimated_memory_gb']}GB, ~{proj['estimated_time_min']:.0f}분")
-            Path("scale_report").mkdir(exist_ok=True)
-            with open("scale_report/metrics.json", "w", encoding="utf-8") as f:
-                json.dump(scale_metrics, f, ensure_ascii=False, indent=2, default=str)
-            ckpt.save_intermediate("scale_metrics", scale_metrics)
-        except Exception as e:
-            prog.update(label=f"스케일 지표 실패: {e}")
-
-    # ────────────────────────────────────────────
     # STEP 10: Ablation Study — 최적 조합 탐색
     # ────────────────────────────────────────────
     with ckpt.step("step10_ablation", skip_if_done=skip_done) as prog:
@@ -437,9 +419,9 @@ def main() -> int:
     with ckpt.step("step12_tuning", skip_if_done=skip_done) as prog:
         try:
             prog.update(label="Optuna 튜닝 시작 (10분 타임아웃)...")
-            import subprocess
+            import subprocess as _sp2
             train_end_str = args.train_end or f"{features['year_month'].max().year - 1}-12"
-            result = subprocess.run(
+            result = _sp2.run(
                 [sys.executable, "-m", "scripts.tune_lgbm",
                  "--source", args.source, "--train-end", train_end_str,
                  "--timeout", "600", "--n-trials", "50"],
@@ -451,6 +433,72 @@ def main() -> int:
                 prog.update(label="튜닝 실패 또는 시간 초과")
         except Exception as e:
             prog.update(label=f"튜닝 실패: {e}")
+
+    # ────────────────────────────────────────────
+    # STEP 12.5: 튜닝 모델 Sliding 재평가
+    # ────────────────────────────────────────────
+    with ckpt.step("step12_5_tuned_sliding", skip_if_done=skip_done) as prog:
+        tuned_path = Path("weights/dsz_lgbm_tuned/model.txt")
+        if tuned_path.exists():
+            try:
+                booster_tuned, spec_tuned = lgbm.load("weights/dsz_lgbm_tuned")
+                prog.update(label="튜닝 모델 Sliding 재평가 중...")
+
+                test_tuned = features.copy()
+                train_end_p = pd.Period(args.train_end, freq="M") if args.train_end else None
+                if train_end_p is None:
+                    max_ym = features["year_month"].max()
+                    train_end_p = pd.Period(f"{max_ym.year - 1}-12", freq="M")
+                test_tuned = test_tuned[test_tuned["year_month"] > train_end_p]
+                for c in spec_tuned.categorical:
+                    if c in test_tuned.columns:
+                        test_tuned[c] = test_tuned[c].astype("category")
+
+                tuned_sliding = []
+                for md in [1, 5, 10, 15, 20, 25]:
+                    try:
+                        h_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
+                        ctx_md = ev.attach_alarm_context(h_md, monthly)
+                        pred_vals = booster_tuned.predict(
+                            test_tuned[spec_tuned.all], num_iteration=booster_tuned.best_iteration
+                        )
+                        pred_df = test_tuned[[CUSTOMER_ID, "year_month", "horizon_days"]].copy()
+                        pred_df["pred_monthly_kwh"] = pred_vals
+                        merged = ctx_md.merge(pred_df, on=[CUSTOMER_ID, "year_month", "horizon_days"], how="inner")
+                        merged["meter_day"] = md
+                        merged["error"] = merged["pred_monthly_kwh"] - merged["full_month_kwh"]
+                        merged["pct_error"] = merged["error"].abs() / merged["full_month_kwh"].clip(lower=1e-9) * 100
+                        tuned_sliding.append(merged)
+                    except Exception:
+                        pass
+
+                if tuned_sliding:
+                    from src.eval_detailed import save_detailed_evaluation
+                    all_tuned = pd.concat(tuned_sliding, ignore_index=True)
+                    dims_tuned = save_detailed_evaluation(all_tuned, "sliding_results_tuned")
+                    ckpt.save_intermediate("tuned_sliding", dims_tuned.get("overall", pd.DataFrame()))
+            except Exception as e:
+                prog.update(label=f"튜닝 모델 평가 실패: {e}")
+        else:
+            prog.update(label="튜닝 모델 없음 — 스킵")
+
+    # ────────────────────────────────────────────
+    # STEP 13: 스케일 아웃 지표 (최종 모델 기준)
+    # ────────────────────────────────────────────
+    with ckpt.step("step13_scale", skip_if_done=skip_done) as prog:
+        try:
+            from src.scale import estimate_scale_metrics
+            scale_metrics = estimate_scale_metrics(df)
+            cur = scale_metrics["current"]
+            prog.update(label=f"현재: {cur['n_customers']:,}호, {cur['memory_mb']:.0f}MB")
+            for target, proj in scale_metrics["projections"].items():
+                prog.update(label=f"{target}: ~{proj['estimated_memory_gb']}GB, ~{proj['estimated_time_min']:.0f}분")
+            Path("scale_report").mkdir(exist_ok=True)
+            with open("scale_report/metrics.json", "w", encoding="utf-8") as f:
+                json.dump(scale_metrics, f, ensure_ascii=False, indent=2, default=str)
+            ckpt.save_intermediate("scale_metrics", scale_metrics)
+        except Exception as e:
+            prog.update(label=f"스케일 지표 실패: {e}")
 
     # ────────────────────────────────────────────
     # 완료
@@ -472,6 +520,7 @@ def main() -> int:
     eval_results/            — 모델 평가 (기본값)
     sliding_results/         — Sliding 상세 평가 (기본값)
     sliding_results_optimal/ — Sliding 상세 평가 (최적 조합)
+    sliding_results_tuned/   — Sliding 상세 평가 (튜닝 모델)
     ablation_results/        — Ablation Study
     feature_selection/       — 피처 선정 근거
     weights/dsz_lgbm/        — 기본 모델

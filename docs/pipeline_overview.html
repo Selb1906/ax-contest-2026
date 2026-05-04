@@ -118,26 +118,27 @@
 <span class="phase">Phase 4</span> 하이퍼파라미터 튜닝 (Step 12, Optuna 10분)</div>
 
 <!-- ===== 전체 Step ===== -->
-<h2>전체 파이프라인 12 Step</h2>
-<p style="margin-bottom:12px; font-size:0.9rem;">각 Step이 하는 일과 <strong>왜 필요한지</strong>:</p>
+<h2>전체 파이프라인 13 Step</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">각 Step이 하는 일과 <strong>왜 필요한지</strong>. 순서가 중요 — 뒤 Step이 앞 Step 결과에 의존합니다.</p>
 
 <table>
-  <tr><th>Step</th><th>모듈</th><th>내용</th><th>산출물</th></tr>
-  <tr><td>0</td><td><code>inspect_lp.py</code></td><td>LP 구조 탐색 + yaml 자동 생성 (최초 1회)</td><td>source_dsz.yaml</td></tr>
-  <tr><td>1</td><td><code>io_adapter.py</code></td><td>데이터 로딩 (CSV/Excel/Parquet/DB, 시간형식 자동보정)</td><td>—</td></tr>
-  <tr><td>1.5</td><td><code>preprocess.py</code></td><td>결측 보간 + 이상값 제거</td><td>preprocess_log/</td></tr>
-  <tr><td>2</td><td><code>btm_detect.py</code></td><td>BTM 탐지 → is_btm + btm_score 피처 투입</td><td>btm_results/</td></tr>
-  <tr><td>3</td><td><code>profiler.py</code></td><td>19개 통계 (반출 안전)</td><td>profile_stats/dsz/</td></tr>
-  <tr><td>4</td><td><code>baselines.py</code></td><td>베이스라인 5종</td><td>eval_results/baselines.*</td></tr>
-  <tr><td>5</td><td><code>lgbm.py</code></td><td>LightGBM 학습 (기본값)</td><td>weights/dsz_lgbm/</td></tr>
-  <tr><td>5.5</td><td><code>eval_detailed.py</code></td><td>Sliding 상세 평가 (검침일 1/5/10/15/20/25)</td><td>sliding_results/</td></tr>
-  <tr><td>6</td><td><code>explain.py</code></td><td>SHAP + 상관행렬</td><td>explain_results/</td></tr>
-  <tr><td>7</td><td><code>optimize.py</code></td><td>기상 최적화 (OLS 그리드 55개 + LP역산 + 계절별)</td><td>weather_opt/</td></tr>
-  <tr><td>8</td><td><code>asos.py</code></td><td>기상 민감도 (기온 교란 시뮬레이션)</td><td>weather_opt/sensitivity.*</td></tr>
-  <tr><td>9</td><td><code>scale.py</code></td><td>스케일 아웃 지표 추정</td><td>scale_report/</td></tr>
-  <tr><td>10</td><td><code>ablation_study.py</code></td><td>Ablation (BTM/기상/기준온도/피처선택/피처그룹)</td><td>ablation_results/</td></tr>
-  <tr><td>11</td><td><code>feature_selection.py</code></td><td>최적 조합 재학습 + 피처 자동 선정</td><td>weights/dsz_lgbm_optimal/</td></tr>
-  <tr><td>12</td><td><code>tune_lgbm.py</code></td><td>Optuna 하이퍼파라미터 튜닝 (10분)</td><td>weights/dsz_lgbm_tuned/</td></tr>
+  <tr><th>Step</th><th>모듈</th><th>내용</th><th>산출물</th><th>비고</th></tr>
+  <tr><td>0</td><td><code>inspect_lp.py</code></td><td>LP 구조 탐색 + yaml 자동 생성</td><td>source_dsz.yaml</td><td>최초 1회</td></tr>
+  <tr><td>1</td><td><code>io_adapter.py</code></td><td>데이터 로딩 (시간형식 자동보정)</td><td>—</td><td></td></tr>
+  <tr><td>1.5</td><td><code>preprocess.py</code></td><td>결측 보간 + 이상값 제거</td><td>preprocess_log/</td><td></td></tr>
+  <tr><td>2</td><td><code>btm_detect.py</code></td><td>BTM 탐지 → btm_score 피처 투입</td><td>btm_results/</td><td></td></tr>
+  <tr><td>3</td><td><code>profiler.py</code></td><td>19개 통계 (반출 안전)</td><td>profile_stats/</td><td></td></tr>
+  <tr><td>4</td><td><code>baselines.py</code></td><td>베이스라인 5종</td><td>eval_results/</td><td></td></tr>
+  <tr><td>5</td><td><code>lgbm.py</code></td><td>LightGBM 학습 (기본값)</td><td>weights/dsz_lgbm/</td><td style="color:#0984e3;font-weight:600;">→ PC 2,3에 공유</td></tr>
+  <tr><td>5.5</td><td><code>eval_detailed.py</code></td><td>Sliding 상세 평가 (기본 모델)</td><td>sliding_results/</td><td></td></tr>
+  <tr><td>6</td><td><code>explain.py</code></td><td>SHAP + 상관행렬</td><td>explain_results/</td><td>PC 3 가능</td></tr>
+  <tr><td>7</td><td><code>optimize.py</code></td><td>기상 최적화 (OLS + LP역산 CSV 생성)</td><td>weather_opt/</td><td>PC 3 가능</td></tr>
+  <tr><td>8</td><td><code>asos.py</code></td><td>기상 민감도</td><td>weather_opt/sensitivity.*</td><td>PC 3 가능</td></tr>
+  <tr><td>10</td><td><code>ablation_study.py</code></td><td>Ablation (BTM/기상/기준온도/피처/그룹)</td><td>ablation_results/</td><td>PC 2</td></tr>
+  <tr><td>11</td><td><code>lgbm.py + feature_selection.py</code></td><td>최적 조합 재학습 + 피처 자동 선정 + Sliding</td><td>weights/dsz_lgbm_optimal/<br>sliding_results_optimal/</td><td>PC 2</td></tr>
+  <tr><td>12</td><td><code>tune_lgbm.py</code></td><td>Optuna 튜닝</td><td>weights/dsz_lgbm_tuned/</td><td>PC 2</td></tr>
+  <tr><td>12.5</td><td><code>eval_detailed.py</code></td><td>Sliding 재평가 (튜닝 모델)</td><td>sliding_results_tuned/</td><td></td></tr>
+  <tr><td>13</td><td><code>scale.py</code></td><td>스케일 아웃 지표 (최종 모델 기준)</td><td>scale_report/</td><td>맨 마지막</td></tr>
 </table>
 
 <div class="desc">체크포인트: 각 Step 완료 시 자동 저장. 진행률 바 + ETA. Ctrl+C 안전. 모든 결과 PNG+CSV+JSON 이중 저장.</div>
@@ -515,33 +516,37 @@ data/weather/ (ASOS 가중평균 5버전 + 8개 스테이션)</div>
 </p>
 
 <table>
-  <tr><th>인원</th><th>PC 1 (메인)</th><th>PC 2</th><th>PC 3</th><th>PC 4</th></tr>
+  <tr><th>인원</th><th>PC 1 (메인)</th><th>PC 2 (Ablation+튜닝)</th><th>PC 3 (SHAP+기상)</th><th>PC 4 (BTM solar)</th></tr>
   <tr>
     <td><strong>1명</strong></td>
-    <td>전체 파이프라인 (Step 1~12)</td>
+    <td>전체 파이프라인 (Step 1~13)</td>
     <td>—</td><td>—</td><td>—</td>
   </tr>
   <tr>
     <td><strong>2명</strong></td>
-    <td>Step 1~9 + SHAP</td>
-    <td>Ablation + 튜닝</td>
+    <td>Step 1~5.5 + SHAP + 기상<br>→ 최종 Sliding + 스케일</td>
+    <td>Step 10~12.5 (Ablation→재학습→튜닝→Sliding)</td>
     <td>—</td><td>—</td>
   </tr>
   <tr>
     <td><strong>3명</strong></td>
-    <td>Step 1~5 + Sliding + SHAP</td>
-    <td>Ablation + 튜닝</td>
-    <td>BTM비교 + 기상비교 + 피처선택</td>
+    <td>Step 1~5.5<br>→ weights 공유<br>→ 최종 Sliding + 스케일</td>
+    <td>Step 10~12.5<br>(Ablation→재학습→튜닝→Sliding)</td>
+    <td>Step 6 (SHAP)<br>Step 7~8 (기상최적화+민감도)</td>
     <td>—</td>
   </tr>
   <tr>
     <td><strong>4명</strong></td>
-    <td>Step 1~5 + Sliding</td>
-    <td>Ablation + 재학습</td>
-    <td>SHAP + 피처선택 + 기상비교</td>
-    <td>BTM + btm_solar + 튜닝</td>
+    <td>Step 1~5.5<br>→ weights 공유<br>→ 최종 Sliding + 스케일</td>
+    <td>Step 10~12.5</td>
+    <td>Step 6 + Step 7~8</td>
+    <td>BTM solar 모델<br>프로파일러 검토<br>보고서 초안</td>
   </tr>
 </table>
+<div class="desc">
+  의존 관계: PC 1이 Step 5 완료 → weights/ 공유 → PC 2,3 시작 가능.<br>
+  PC 2가 Step 12 완료 → 튜닝 모델 → PC 1이 최종 Sliding + 스케일 아웃 (Step 13).
+</div>
 
 <div class="desc">공유 필요: source_dsz.yaml (PC 1 → 전체), weights/ (PC 1 → PC 2,3,4)</div>
 

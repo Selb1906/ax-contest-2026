@@ -70,26 +70,26 @@ TEAM_PLANS = {
         },
     },
     3: {
-        "description": "3명 — 메인 + Ablation + BTM/기상 병렬",
+        "description": "3명 — 메인 + Ablation·튜닝 + SHAP·기상",
         "roles": {
             "PC 1 (메인)": [
-                "0. LP 구조 탐색 → yaml 공유",
-                "1. Step 1~5 (학습까지)",
-                "→ weights/ + features/ 를 PC 2,3에 공유",
-                "   Step 5.5 Sliding 평가",
-                "   Step 6 SHAP 분석",
+                "0. LP 구조 탐색 → yaml + weights 공유",
+                "1. Step 1~5 (학습까지) + Step 5.5 Sliding 평가",
+                "→ Step 5 완료 즉시 weights/ 를 PC 2,3에 공유",
+                "   Step 5 이후 대기 → PC 2 Ablation 완료 대기",
+                "   → 최종 모델로 Sliding 재평가 + 스케일 아웃",
             ],
-            "PC 2 (Ablation)": [
-                "※ PC 1의 Step 5 완료 대기",
-                "5. Ablation Study (BTM/기상/기준온도/피처)",
-                "6. 하이퍼파라미터 튜닝",
-                "→ 최적 설정 ablation_results/에 저장",
+            "PC 2 (Ablation + 튜닝)": [
+                "※ PC 1의 weights/ 수령 후 시작",
+                "Step 10: Ablation Study (BTM/기상/기준온도/피처/그룹)",
+                "Step 11: 최적 조합 재학습 + 피처 자동 선정",
+                "Step 12: Optuna 튜닝 → Step 12.5 Sliding 재평가",
             ],
-            "PC 3 (BTM + 기상)": [
-                "2. BTM 전략 비교 (A/B/C) — 별도 상세 분석",
-                "3. 기상 버전 비교 (6+가지)",
-                "4. 피처 선택 실험",
-                "→ 결과를 btm_results/, weather_opt/에 저장",
+            "PC 3 (SHAP + 기상)": [
+                "※ PC 1의 weights/ 수령 후 시작",
+                "Step 6: SHAP 분석",
+                "Step 7~8: 기상 최적화 + 민감도 분석",
+                "→ explain_results/, weather_opt/ 저장",
             ],
         },
     },
@@ -97,26 +97,24 @@ TEAM_PLANS = {
         "description": "4명 — 최대 병렬",
         "roles": {
             "PC 1 (메인)": [
-                "0. LP 구조 탐색 → yaml 공유",
-                "1. Step 1~5 (학습까지)",
-                "→ weights/ 공유",
-                "   Step 5.5 Sliding 평가",
+                "0. LP 구조 탐색 → yaml + weights 공유",
+                "1. Step 1~5 + Step 5.5 Sliding 평가",
+                "→ weights/ 공유 후 대기 → 최종 Sliding + 스케일 아웃",
             ],
-            "PC 2 (Ablation)": [
-                "※ PC 1의 Step 5 완료 대기",
-                "5. Ablation Study",
-                "→ 최적 설정 확정 후 재학습",
+            "PC 2 (Ablation + 튜닝)": [
+                "※ PC 1의 weights/ 수령 후 시작",
+                "Step 10: Ablation Study",
+                "Step 11: 최적 조합 재학습",
+                "Step 12: Optuna 튜닝 + Step 12.5 Sliding",
             ],
-            "PC 3 (분석)": [
-                "6. SHAP 분석",
-                "4. 피처 선택 실험",
-                "3. 기상 버전 비교",
-                "→ explain_results/, feature_selection/ 저장",
+            "PC 3 (SHAP + 기상)": [
+                "※ PC 1의 weights/ 수령 후 시작",
+                "Step 6: SHAP 분석",
+                "Step 7~8: 기상 최적화 + 민감도",
             ],
-            "PC 4 (BTM + 튜닝)": [
-                "2. BTM 전략 비교",
-                "   BTM 태양광 발전량 예측 모델 작업 (btm_solar.py)",
-                "6. 하이퍼파라미터 튜닝 (남은 시간)",
+            "PC 4 (BTM solar + 프로파일러)": [
+                "BTM 태양광 발전량 예측 모델 작업 (btm_solar.py)",
+                "프로파일러 결과 상세 검토 + 보고서 초안",
             ],
         },
     },
