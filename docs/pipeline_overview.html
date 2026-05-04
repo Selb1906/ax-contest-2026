@@ -545,10 +545,91 @@ data/weather/ (ASOS 가중평균 5버전 + 8개 스테이션)</div>
 
 <div class="desc">공유 필요: source_dsz.yaml (PC 1 → 전체), weights/ (PC 1 → PC 2,3,4)</div>
 
-<!-- ===== TODO ===== -->
-<h2>미완료 작업 (TODO)</h2>
+<!-- ===== 사전 작업 TODO ===== -->
+<h2>방문 전 작업 (로컬에서 해야 할 것)</h2>
 <p style="margin-bottom:12px; font-size:0.9rem;">
-  현재 코드가 <strong>대부분 완성</strong>되어 있지만, 아래 항목은 추가 작업이 필요합니다.
+  안심구역 방문 <strong>전에</strong> 로컬에서 완료해야 하는 작업입니다.
+</p>
+
+<table>
+  <tr><th>항목</th><th>상태</th><th>담당</th><th>내용</th></tr>
+  <tr>
+    <td style="color:#d63031;font-weight:600;">BTM 발전량 예측 모델</td>
+    <td><span class="badge b-red">미완성</span></td>
+    <td>BTM 담당 팀원</td>
+    <td>
+      <code>src/models/btm_solar.py</code>에 골격만 있음. 전력거래소의 "자가용 태양광 출력 추계" 데이터를 받아서
+      기상→BTM 월별 발전량 예측 모델 학습 코드를 완성해야 함.<br>
+      <strong>현재 상황</strong>: BTM 담당 팀원에게 데이터 요청 중. 데이터 수령 후 작업 가능.<br>
+      <strong>관련 코드</strong>: <code>src/btm_detect.py</code>(탐지)는 완료 — btm_score 피처 투입 동작함.
+    </td>
+  </tr>
+  <tr>
+    <td style="color:#e17055;font-weight:600;">반입 번들 최종 패키징</td>
+    <td><span class="badge b-orange">재작업 필요</span></td>
+    <td>전원 확인</td>
+    <td>
+      코드가 계속 업데이트되었으므로 <strong>방문 직전에 zip을 다시 만들어야</strong> 함.<br>
+      <code>dsz_submit_code.zip</code> (신청서 첨부) + <code>dsz_bundle_submit.zip</code> (USB 반입, wheels 포함).<br>
+      Optuna wheel도 추가 필요. ASOS 데이터를 <code>dsz_bundle/external_data/</code>에 포함시킬지 결정.
+    </td>
+  </tr>
+  <tr>
+    <td style="color:#e17055;font-weight:600;">ASOS 데이터 반입 준비</td>
+    <td><span class="badge b-orange">확인 필요</span></td>
+    <td>전원</td>
+    <td>
+      현재 ASOS 7년치(2020~2026)가 <code>ASOS/</code>에 있음. 이걸 반입 USB에 포함시켜야 함.<br>
+      <strong>반입 신고서에 "기상청 ASOS 데이터"로 기재</strong>되어 있는지 확인.<br>
+      가중평균 CSV 5개 버전은 이미 <code>data/weather/</code>에 생성됨.
+    </td>
+  </tr>
+  <tr>
+    <td style="color:#e17055;font-weight:600;">공휴일 캘린더 검증</td>
+    <td><span class="badge b-orange">검토 필요</span></td>
+    <td>전원</td>
+    <td>
+      <code>dsz_bundle/external_data/holidays_kr.csv</code>에 2021~2026 공휴일 입력됨.<br>
+      <strong>2025년 12월 14일 대선, 2026년 6월 3일 지선, 7월 17일 제헌절</strong> 등 최신 항목 반영 확인.<br>
+      임시공휴일은 사후 지정이라 누락 가능 — 실 LP 기간에 맞춰 재확인.
+    </td>
+  </tr>
+  <tr>
+    <td>합성 데이터 테스트</td>
+    <td><span class="badge b-gray">선택</span></td>
+    <td>전원</td>
+    <td>
+      현재 합성 데이터(synth_v1)가 2022년 1년치라 train/test 분할 시 train=0 에러 발생.<br>
+      <strong>안심구역에서는 3년치이므로 문제없지만</strong>, 로컬 테스트를 원하면 합성 데이터를 3년으로 확장하거나
+      <code>source_public_apt.yaml</code>(공동주택 공공데이터 3년)으로 테스트.
+    </td>
+  </tr>
+  <tr>
+    <td>팀원 코드 리뷰</td>
+    <td><span class="badge b-gray">진행 중</span></td>
+    <td>전원</td>
+    <td>
+      GitHub에 올린 코드를 팀원 전원이 검토. 특히:<br>
+      — <code>src/profiler.py</code>: 19개 통계 항목 적절한지<br>
+      — <code>src/preprocess.py</code>: 전처리 방법 합의<br>
+      — <code>src/tariff.py</code>: 요금 단가 정확한지 (2026.04.16 기준)
+    </td>
+  </tr>
+  <tr>
+    <td>서류 준비</td>
+    <td><span class="badge b-gray">초안 완료</span></td>
+    <td>전원</td>
+    <td>
+      <code>docs/dsz_documents_draft.md</code>에 초안 있음. .hwpx 양식 다운로드 → 내용 채움 → 스캔 → <code>biz-dsz@kepco.co.kr</code> 발송.<br>
+      서류: 이용신청서, 보안서약서, 이용준수서약서, 개인정보동의서, 반출신청서(사전 작성).
+    </td>
+  </tr>
+</table>
+
+<!-- ===== 안심구역 TODO ===== -->
+<h2>안심구역에서 확인할 것 (현장 TODO)</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  현장에서 실 LP 데이터를 봐야만 확인·결정할 수 있는 항목들입니다.
 </p>
 
 <table>
