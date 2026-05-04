@@ -363,10 +363,11 @@ def main() -> int:
         try:
             import subprocess
             prog.update(label="Ablation Study 실행 중...")
-            train_end_str = args.train_end or f"{features['year_month'].max().year - 1}-12"
+            # Ablation에는 val_end를 전달 — Ablation 내부에서 train은 ~val_end, test는 val_end 이후
+            abl_end = str(val_end_p) if val_end_p else (args.train_end or f"{features['year_month'].max().year - 1}-12")
             result = subprocess.run(
                 [sys.executable, "-m", "scripts.ablation_study",
-                 "--source", args.source, "--train-end", train_end_str],
+                 "--source", args.source, "--train-end", abl_end],
                 capture_output=False,
             )
             if result.returncode == 0:

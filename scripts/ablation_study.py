@@ -123,7 +123,8 @@ def run_single_experiment(df, config, train_end):
     if config.feature_selection:
         from src.feature_selection import auto_select_features
         # 누수 방지: train+val에서만 피처 선택 (test 미포함)
-        trainval = features[features["year_month"] <= train_end]
+        # Ablation의 train_end는 val 포함 기간이므로 그대로 사용
+        trainval = features[features["year_month"] <= train_end]  # Ablation에서는 train_end가 val 끝
         result = auto_select_features(
             trainval, spec.numeric, "full_month_kwh",
             corr_threshold=config.corr_threshold,
