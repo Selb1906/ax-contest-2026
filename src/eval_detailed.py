@@ -153,6 +153,27 @@ def error_by_dimension(
     except Exception:
         pass
 
+    # 날짜별 오차 (반출 안전 — 고객 수 min_n 이상 날짜만)
+    if "year_month" in results.columns and "meter_day" in results.columns:
+        min_n_date = 10
+        date_rows = []
+        for (ym, md), grp in results.groupby(["year_month", "meter_day"]):
+            if len(grp) < min_n_date:
+                continue
+            m = _agg(grp)
+            m["year_month"] = str(ym)
+            m["meter_day"] = int(md)
+            date_rows.append(m)
+        if date_rows:
+            date_df = pd.DataFrame(date_rows)
+            # 오차 상위/하위
+            if "mape_pct" in date_df.columns and len(date_df) > 0:
+                worst = date_df.nlargest(10, "mape_pct")
+                best = date_df.nsmallest(10, "mape_pct")
+                output["worst_dates"] = worst
+                output["best_dates"] = best
+                output["by_date"] = date_df
+
     return output
 
 
@@ -198,6 +219,19 @@ def save_detailed_evaluation(
             ax.set_ylabel("MAPE (%)")
             ax.grid(alpha=0.3)
         save_chart(plot_meter_day, out, "mape_by_meter_day", by_md, "검침일별 MAPE")
+
+    # 오차 큰/작은 날짜 (반출 안전 — customer_id 없음)
+    if "worst_dates" in dims and len(dims["worst_dates"]) > 0:
+        save_dataframe(dims["worst_dates"], out, "worst_dates", "오차 상위 10개 날짜")
+        save_dataframe(dims["best_dates"], out, "best_dates", "오차 하위 10개 날짜")
+        print(f"\n  오차 큰 날짜 (상위 5):")
+        for _, row in dims["worst_dates"].head(5).iterrows():
+            print(f"    {row.get('year_month','')} md={row.get('meter_day','')}: "
+                  f"MAPE {row.get('mape_pct',0):.2f}%  n={row.get('n',0)}")
+        print(f"  오차 작은 날짜 (하위 5):")
+        for _, row in dims["best_dates"].head(5).iterrows():
+            print(f"    {row.get('year_month','')} md={row.get('meter_day','')}: "
+                  f"MAPE {row.get('mape_pct',0):.2f}%  n={row.get('n',0)}")
 
     # 요약 출력
     if "overall" in dims and len(dims["overall"]) > 0:
