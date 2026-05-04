@@ -1,0 +1,60 @@
+# 데이터 (용량 큼, 민감)
+data/raw/
+data/interim/
+data/processed/
+data/synth/
+data/ui/
+data/weather/
+
+# ASOS 원본 (CSV 7년치 ~50MB)
+ASOS/
+
+# 분석 산출물 (안심구역에서 생성)
+profile_stats/
+btm_results/
+eval_results/
+sliding_results/
+sliding_results_optimal/
+explain_results/
+weather_opt/
+ablation_results/
+feature_selection/
+tuning_results/
+scale_report/
+preprocess_log/
+predictions/
+checkpoints/
+
+# 모델 가중치
+weights/
+
+# 반입 번들
+dsz_bundle/wheels/
+dsz_bundle_submit.zip
+dsz_submit_code.zip
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 과제 원본
+_task_brief.txt
+*.pdf
+
+# Streamlit
+.streamlit/
+
+# 임시
+_zip_staging*/

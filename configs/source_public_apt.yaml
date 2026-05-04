@@ -1,0 +1,4 @@
+source:
+  kind: public_apt
+  # 압축 풀린 CSV 3개년이 놓인 디렉터리 — 자동 glob
+  path: "data/raw"

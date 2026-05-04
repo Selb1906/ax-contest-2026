@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>전기요금 과다발생 예측 — 파이프라인 개요</title>
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Pretendard',-apple-system,'Malgun Gothic',sans-serif; background:#f5f6f8; color:#2d3436; line-height:1.8; padding:40px 24px; font-size:15px; letter-spacing:-0.2px; }
+  .container { max-width:1060px; margin:0 auto; }
+  h1 { font-size:2rem; margin-bottom:6px; color:#1a1a2e; font-weight:700; }
+  .subtitle { color:#636e72; margin-bottom:36px; font-size:0.9rem; }
+  h2 { font-size:1.25rem; color:#0984e3; margin:40px 0 16px; padding-bottom:8px; border-bottom:2px solid #0984e3; font-weight:700; }
+  h3 { font-size:1rem; color:#2d3436; margin:20px 0 10px; font-weight:600; }
+  .card { background:#fff; border:1px solid #dfe6e9; border-radius:10px; padding:18px 22px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+  .card-title { font-weight:700; font-size:0.95rem; margin-bottom:8px; }
+  .stats { display:flex; gap:14px; margin-bottom:28px; flex-wrap:wrap; }
+  .stat-box { background:#fff; border:1px solid #dfe6e9; border-radius:10px; padding:16px 24px; text-align:center; flex:1; min-width:120px; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+  .stat-num { font-size:1.8rem; font-weight:700; color:#0984e3; }
+  .stat-label { color:#636e72; font-size:0.78rem; margin-top:2px; font-weight:500; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:0.85rem; }
+  th,td { text-align:left; padding:8px 12px; border-bottom:1px solid #ecf0f1; }
+  th { background:#f8f9fa; color:#636e72; font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.3px; }
+  tr:hover { background:#f8f9fa; }
+  td code { background:#eaf2ff; padding:2px 6px; border-radius:4px; font-family:'JetBrains Mono',monospace; font-size:0.8rem; color:#0066cc; font-weight:500; }
+  .flow-box { background:#fff; border:1px solid #dfe6e9; border-radius:10px; padding:18px 22px; margin:12px 0; font-family:'JetBrains Mono',monospace; white-space:pre; font-size:0.78rem; overflow-x:auto; line-height:1.9; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+  .badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:0.7rem; font-weight:700; }
+  .b-green { background:#e8f8f0; color:#00b894; } .b-blue { background:#e8f0fe; color:#0984e3; }
+  .b-orange { background:#fef5e7; color:#e17055; } .b-red { background:#fde8e8; color:#d63031; }
+  .b-purple { background:#f0e6ff; color:#6c5ce7; } .b-gray { background:#f0f0f0; color:#636e72; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:700px) { .grid2 { grid-template-columns:1fr; } }
+  ul { padding-left:20px; margin:6px 0; } li { margin:3px 0; font-size:0.85rem; }
+  .desc { color:#b2bec3; font-size:0.82rem; margin-top:6px; font-weight:500; }
+  .highlight { background:#fff9e6; border-left:4px solid #fdcb6e; padding:14px 18px; margin:14px 0; font-size:0.88rem; border-radius:0 8px 8px 0; }
+  .highlight strong { color:#e17055; }
+  .phase { background:#0984e3; color:#fff; display:inline-block; padding:4px 14px; border-radius:6px; font-weight:700; font-size:0.78rem; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>전기요금 과다발생 사전 예측모델</h1>
+<div class="subtitle">2026 AX 아이디어 경진대회 — 한국전력공사 지정과제 | 파이프라인 상세 개요</div>
+
+<div class="stats">
+  <div class="stat-box"><div class="stat-num">19</div><div class="stat-label">프로파일러 통계</div></div>
+  <div class="stat-box"><div class="stat-num">32+</div><div class="stat-label">모델 피처</div></div>
+  <div class="stat-box"><div class="stat-num">7</div><div class="stat-label">예측 모델</div></div>
+  <div class="stat-box"><div class="stat-num">12</div><div class="stat-label">파이프라인 Step</div></div>
+  <div class="stat-box"><div class="stat-num">~15</div><div class="stat-label">Ablation 실험</div></div>
+  <div class="stat-box"><div class="stat-num">8</div><div class="stat-label">오차 지표</div></div>
+</div>
+
+<!-- ===== 분석 구조 ===== -->
+<h2>분석 구조 — 전체 자동 (python run.py → 1번)</h2>
+
+<div class="highlight">1번 선택 시 Step 1~12 전부 자동 실행. 중단 시 <code>--resume</code>으로 이어서. Ablation + 피처 자동 선정 + 튜닝까지 포함.</div>
+
+<div class="flow-box"><span class="phase">Phase 1</span> 기본값 파이프라인 (Step 1~9)
+  로딩 → 전처리 → BTM → 프로파일러 → 베이스라인 → LightGBM → Sliding평가 → SHAP → 기상최적화 → 민감도 → 스케일
+
+<span class="phase">Phase 2</span> Ablation Study (Step 10) — 기본값에서 하나씩만 변경
+  BTM 전략 3가지  /  기상 가중치 6가지  /  기준온도 (Step7 결과 활용)
+  피처선택 on/off  /  피처 그룹별 기여도 (AMI·특수일·기상·래그·역률)
+
+<span class="phase">Phase 3</span> 최적 조합 재학습 (Step 11)
+  Ablation 최적값 조합 → 피처 자동 선정 (상관+VIF) → 재학습 → Sliding 재평가
+
+<span class="phase">Phase 4</span> 하이퍼파라미터 튜닝 (Step 12, Optuna 10분)</div>
+
+<!-- ===== 전체 Step ===== -->
+<h2>전체 파이프라인 12 Step</h2>
+
+<table>
+  <tr><th>Step</th><th>모듈</th><th>내용</th><th>산출물</th></tr>
+  <tr><td>0</td><td><code>inspect_lp.py</code></td><td>LP 구조 탐색 + yaml 자동 생성 (최초 1회)</td><td>source_dsz.yaml</td></tr>
+  <tr><td>1</td><td><code>io_adapter.py</code></td><td>데이터 로딩 (CSV/Excel/Parquet/DB, 시간형식 자동보정)</td><td>—</td></tr>
+  <tr><td>1.5</td><td><code>preprocess.py</code></td><td>결측 보간 + 이상값 제거</td><td>preprocess_log/</td></tr>
+  <tr><td>2</td><td><code>btm_detect.py</code></td><td>BTM 탐지 → is_btm + btm_score 피처 투입</td><td>btm_results/</td></tr>
+  <tr><td>3</td><td><code>profiler.py</code></td><td>19개 통계 (반출 안전)</td><td>profile_stats/dsz/</td></tr>
+  <tr><td>4</td><td><code>baselines.py</code></td><td>베이스라인 5종</td><td>eval_results/baselines.*</td></tr>
+  <tr><td>5</td><td><code>lgbm.py</code></td><td>LightGBM 학습 (기본값)</td><td>weights/dsz_lgbm/</td></tr>
+  <tr><td>5.5</td><td><code>eval_detailed.py</code></td><td>Sliding 상세 평가 (검침일 1/5/10/15/20/25)</td><td>sliding_results/</td></tr>
+  <tr><td>6</td><td><code>explain.py</code></td><td>SHAP + 상관행렬</td><td>explain_results/</td></tr>
+  <tr><td>7</td><td><code>optimize.py</code></td><td>기상 최적화 (OLS 그리드 55개 + LP역산 + 계절별)</td><td>weather_opt/</td></tr>
+  <tr><td>8</td><td><code>asos.py</code></td><td>기상 민감도 (기온 교란 시뮬레이션)</td><td>weather_opt/sensitivity.*</td></tr>
+  <tr><td>9</td><td><code>scale.py</code></td><td>스케일 아웃 지표 추정</td><td>scale_report/</td></tr>
+  <tr><td>10</td><td><code>ablation_study.py</code></td><td>Ablation (BTM/기상/기준온도/피처선택/피처그룹)</td><td>ablation_results/</td></tr>
+  <tr><td>11</td><td><code>feature_selection.py</code></td><td>최적 조합 재학습 + 피처 자동 선정</td><td>weights/dsz_lgbm_optimal/</td></tr>
+  <tr><td>12</td><td><code>tune_lgbm.py</code></td><td>Optuna 하이퍼파라미터 튜닝 (10분)</td><td>weights/dsz_lgbm_tuned/</td></tr>
+</table>
+
+<div class="desc">체크포인트: 각 Step 완료 시 자동 저장. 진행률 바 + ETA. Ctrl+C 안전. 모든 결과 PNG+CSV+JSON 이중 저장.</div>
+
+<!-- ===== Sliding 평가 ===== -->
+<h2>Sliding 상세 평가 (Step 5.5, 기본 포함)</h2>
+
+<div class="card">
+  <div class="card-title">학습 1번 → 예측만 검침일별 반복</div>
+  <ul>
+    <li>검침일 1/5/10/15/20/25 × horizon +10일/+20일 = 12가지 조합</li>
+    <li>검침일 수동 설정 + sliding 지원: <code>build_horizon_table(daily, meter_day=15)</code></li>
+    <li>01~24시 / 24:00 형식 LP 자동 보정</li>
+  </ul>
+</div>
+
+<h3>오차 지표 8가지</h3>
+<table>
+  <tr><th>지표</th><th>의미</th></tr>
+  <tr><td>MAPE</td><td>평균 절대 백분율 오차</td></tr>
+  <tr><td>sMAPE</td><td>대칭 MAPE</td></tr>
+  <tr><td>RMSE</td><td>평균 제곱근 오차</td></tr>
+  <tr><td>NRMSE</td><td>정규화 RMSE (%)</td></tr>
+  <tr><td>CVRMSE</td><td>변동계수 RMSE (%)</td></tr>
+  <tr><td>MAE</td><td>평균 절대 오차</td></tr>
+  <tr><td>Bias</td><td>편향 (과대/과소 방향)</td></tr>
+  <tr><td>Std(error)</td><td>오차 표준편차 (안정성)</td></tr>
+</table>
+
+<h3>분석 차원 6가지</h3>
+<table>
+  <tr><th>차원</th><th>파일</th><th>내용</th></tr>
+  <tr><td>전체</td><td>error_overall.csv</td><td>종합 8개 지표</td></tr>
+  <tr><td>horizon별</td><td>error_by_horizon.csv</td><td>+10일 vs +20일</td></tr>
+  <tr><td>월별</td><td>error_by_month.csv</td><td>1~12월 계절 차이</td></tr>
+  <tr><td>검침일별</td><td>error_by_meter_day.csv</td><td>검침일 위치별 정확도</td></tr>
+  <tr><td>계약종별</td><td>error_by_contract.csv</td><td>주택용 vs 일반용</td></tr>
+  <tr><td>특수일별</td><td>error_by_special.csv</td><td>공휴일 多 vs 少</td></tr>
+</table>
+
+<!-- ===== Ablation ===== -->
+<h2>Ablation Study (Step 10)</h2>
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">BTM 전략 <span class="badge b-red">3가지</span></div>
+    <table>
+      <tr><td>A: 제외</td><td>B: is_btm (0/1)</td><td>C: btm_score (0~1)</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <div class="card-title">기상 가중치 <span class="badge b-blue">6가지</span></div>
+    <table>
+      <tr><td>v1 논문</td><td>v2 판매량</td><td>v3 인구</td></tr>
+      <tr><td>v4 균등</td><td>v5 서울</td><td>8stn 개별</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <div class="card-title">기준온도 <span class="badge b-orange">Step 7 연동</span></div>
+    <ul>
+      <li>Step 7(OLS 55개)에서 상위 후보 자동 로드</li>
+      <li>해당 후보만 LightGBM으로 정밀 검증</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="card-title">피처 <span class="badge b-purple">그룹별 + on/off</span></div>
+    <ul>
+      <li>auto_select on/off 비교</li>
+      <li>AMI·특수일·기상·래그·역률 그룹별 제거 → 기여도</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ===== 피처 선택 ===== -->
+<h2>피처 자동 선정 <code>src/feature_selection.py</code></h2>
+
+<div class="flow-box">32개 후보
+    │
+    ▼ Step 0: 상관 &lt; 0.01 제거 (노이즈 컷오프)
+    ▼ Step 1: 피처 간 상관 &gt; 0.85 쌍 → 목표 상관 낮은 쪽 제거
+    ▼ Step 2: VIF &gt; 10 순차 제거 (목표 상관 낮은 것부터)
+    ▼
+최종 15~20개</div>
+
+<div class="desc">raw temp는 HDD/CDD로 대체 (여름/겨울 상관 상쇄 방지). Ablation Phase 3에서 선택 ON이면 자동 적용.</div>
+
+<!-- ===== 전처리 ===== -->
+<h2>전처리 <code>src/preprocess.py</code></h2>
+<table>
+  <tr><th>단계</th><th>처리</th><th>방법</th><th>기본값</th></tr>
+  <tr><td>1</td><td>중복 제거</td><td>고객×시간 중복 → 마지막 유지</td><td>항상</td></tr>
+  <tr><td>2</td><td>시간 갭</td><td>누락 타임스탬프 NaN 행 생성</td><td>off</td></tr>
+  <tr><td>3</td><td>결측</td><td>interpolate / ffill / drop / zero</td><td>선형 보간 (6h 이하)</td></tr>
+  <tr><td>4</td><td>이상값</td><td>iqr / zscore / jump / quantile</td><td>IQR×3.0</td></tr>
+  <tr><td>5</td><td>잔여 결측</td><td>보간 후 남은 NaN 제거</td><td>항상</td></tr>
+</table>
+
+<!-- ===== 프로파일러 ===== -->
+<h2>프로파일러 <code>src/profiler.py</code> — 19개 통계</h2>
+<table>
+  <tr><th>#</th><th>통계</th><th>파일</th><th>내용</th></tr>
+  <tr><td>00</td><td>스키마</td><td>00_schema.json</td><td>컬럼명, 타입, 결측률</td></tr>
+  <tr><td>01</td><td>커버리지</td><td>01_coverage.json</td><td>기간, 행수, 갭 분포</td></tr>
+  <tr><td>02</td><td>고객 수</td><td>02_customer_counts.json</td><td>계약종별 고객/레코드 수</td></tr>
+  <tr><td>03</td><td>부하 분포</td><td>03_load_distribution.csv</td><td>quantile, lognormal, zero/neg 비율</td></tr>
+  <tr><td>04</td><td>시간대별</td><td>04_hourly_profile.csv</td><td>0~23시 평균</td></tr>
+  <tr><td>05</td><td>요일별</td><td>05_weekly_profile.csv</td><td>월~일 평균</td></tr>
+  <tr><td>06</td><td>월별</td><td>06_monthly_profile.csv</td><td>연-월 트렌드</td></tr>
+  <tr><td>07</td><td>계절성</td><td>07_seasonality_*.csv</td><td>월×시간 히트맵</td></tr>
+  <tr><td>08</td><td>역률</td><td>08_power_factor.json</td><td>유효/피상 분포</td></tr>
+  <tr><td>09</td><td>최대수요</td><td>09_max_demand_ratio.json</td><td>피크/평균 배수</td></tr>
+  <tr><td>10</td><td>알림 발생률</td><td>10_alarm_base_rates.json</td><td>3조건 trigger rate</td></tr>
+  <tr><td>12</td><td>데이터 품질</td><td>12_data_quality.json</td><td>결측, 중복, 음수, 점프</td></tr>
+  <tr><td>13</td><td>기상 회귀</td><td>13_weather_regression.csv</td><td>HDD/CDD 계수</td></tr>
+  <tr><td>14</td><td>부분월 상관</td><td>14_partial_month_correlation.json</td><td>월초 N일 vs 전체 kWh 상관</td></tr>
+  <tr><td>15</td><td>TOU 프로파일</td><td>15_tou_profile.csv</td><td>계절×시간대 부하</td></tr>
+  <tr><td>16</td><td>TOU 비율</td><td>16_tou_usage_ratios.csv</td><td>시간대 사용 비율</td></tr>
+  <tr><td>17</td><td>상관+VIF</td><td>17_correlation_*.csv/png</td><td>변수 간 상관 + 다중공선성</td></tr>
+  <tr><td>18</td><td>부분월 안정성</td><td>18_partial_month_stability.json</td><td>역률/TOU/변동성 관측값 연장 근거</td></tr>
+</table>
+
+<!-- ===== 피처 ===== -->
+<h2>피처 엔지니어링 — 32개</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">관측 기본 <span class="badge b-green">2</span></div>
+    <ul><li><code>partial_kwh</code> (상관 0.976)</li><li><code>partial_rate</code></li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">달력 <span class="badge b-green">3</span></div>
+    <ul><li><code>month</code>, <code>days_in_month</code>, <code>days_observed</code></li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">래그 <span class="badge b-blue">4</span></div>
+    <ul><li><code>prev_month_kwh</code> / <code>yoy_month_kwh</code> / <code>ma3_kwh</code> / <code>customer_mean_history</code></li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">기상 HDD/CDD <span class="badge b-orange">6</span></div>
+    <ul><li><code>hdd_full</code> / <code>cdd_full</code> / <code>hdd_observed</code> / <code>cdd_observed</code> / <code>hdd_remainder</code> / <code>cdd_remainder</code></li></ul>
+    <div class="desc">raw temp 제거 — 여름/겨울 상관 상쇄 방지. HDD/CDD가 상위 호환.</div>
+  </div>
+  <div class="card">
+    <div class="card-title">AMI 패턴 <span class="badge b-purple">9</span></div>
+    <ul>
+      <li><code>observed_peak_ratio</code> / <code>observed_tou_on_peak</code> / <code>observed_night_ratio</code></li>
+      <li><code>observed_load_factor</code> / <code>observed_weekend_weekday_ratio</code> / <code>observed_daily_cv</code></li>
+      <li><code>observed_power_factor</code> / <code>observed_reactive_ratio</code> / <code>pf_vs_prev_month</code></li>
+    </ul>
+    <div class="desc">15분 AMI 데이터 고유 가치. 월별 검침으로는 불가능한 피처.</div>
+  </div>
+  <div class="card">
+    <div class="card-title">특수일 <span class="badge b-red">3</span></div>
+    <ul><li><code>n_workday</code> / <code>n_holiday</code> / <code>disruption_ratio</code></li></ul>
+    <div class="desc">공휴일+징검다리+인접일 통합. 2021~2026 임시공휴일·선거일 포함.</div>
+  </div>
+  <div class="card">
+    <div class="card-title">자동 감지 <span class="badge b-gray">선택적</span></div>
+    <ul><li><code>n_households</code> / <code>kwh_per_household</code> / <code>contract_power_kw</code></li>
+    <li><code>region_code</code> / <code>is_btm</code> / <code>btm_score</code></li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">고객 속성 <span class="badge b-gray">1 (categorical)</span></div>
+    <ul><li><code>contract_type</code></li></ul>
+  </div>
+</div>
+
+<!-- ===== 기상 ===== -->
+<h2>기상 데이터 — ASOS 8대 도시 (2020~2026, 7년)</h2>
+<table>
+  <tr><th>관측소</th><th>도시</th><th>맵핑</th><th>가중치 (논문 표6)</th></tr>
+  <tr><td>108</td><td>서울</td><td>서울+경기북부</td><td>43.76%</td></tr>
+  <tr><td>112</td><td>인천</td><td>인천</td><td>5.58%</td></tr>
+  <tr><td>119</td><td>수원</td><td>경기남부</td><td>4.48%</td></tr>
+  <tr><td>114</td><td>원주</td><td>강원</td><td>3.06%</td></tr>
+  <tr><td>133</td><td>대전</td><td>대전+충남+충북</td><td>6.33%</td></tr>
+  <tr><td>143</td><td>대구</td><td>대구+경북</td><td>8.38%</td></tr>
+  <tr><td>156</td><td>광주</td><td>광주+전남+전북</td><td>6.47%</td></tr>
+  <tr><td>159</td><td>부산</td><td>부산+경남+울산</td><td>21.94%</td></tr>
+</table>
+<div class="desc">CDH/HDH: 시간별 산출 → 시간대 분리 (주간09~18/저녁18~23/야간23~09). CDD vs CDH는 안심구역에서 실증 비교.</div>
+
+<h3>기상 최적화 4개 방법</h3>
+<table>
+  <tr><th>방법</th><th>내용</th><th>속도</th></tr>
+  <tr><td>1. LP 역산</td><td>실 LP-기온 회귀로 가중치 직접 추정</td><td>빠름</td></tr>
+  <tr><td>2. 계절별</td><td>여름(CDH)/겨울(HDH) 가중치 분리</td><td>빠름</td></tr>
+  <tr><td>3. 개별 투입</td><td>8개 스테이션 → SHAP 암묵적 가중치</td><td>보통</td></tr>
+  <tr><td>4. 기준온도</td><td>HDD/CDD base 그리드 55개 (OLS) → Ablation에 전달</td><td>~5초</td></tr>
+</table>
+
+<!-- ===== 요금 ===== -->
+<h2>요금 환산 <code>src/tariff.py</code> — 2026.04.16 시행</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">주택용 누진제</div>
+    <table>
+      <tr><th></th><th>기타계절</th><th>하계</th></tr>
+      <tr><td>1구간</td><td>~300kWh 120.0원</td><td>~200kWh 105.0원</td></tr>
+      <tr><td>2구간</td><td>~450kWh 214.6원</td><td>~400kWh 174.0원</td></tr>
+      <tr><td>3구간</td><td>450+ 307.3원</td><td>400+ 242.3원</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <div class="card-title">일반용 지원</div>
+    <ul>
+      <li>일반용(갑) I — 계절별 단일 단가</li>
+      <li>일반용(갑) II — TOU</li>
+      <li>일반용(을) 300kW 미만 — 단일/TOU</li>
+      <li>일반용(을) 300kW 이상 — TOU</li>
+      <li>저압/고압A/B/C + 선택I/II/III</li>
+    </ul>
+    <div class="desc">계약종별 문자열 자동 매칭 (부분 매칭 지원)</div>
+  </div>
+</div>
+
+<!-- ===== BTM ===== -->
+<h2>BTM 처리 — 3단계</h2>
+<table>
+  <tr><th>단계</th><th>내용</th><th>상태</th></tr>
+  <tr><td>1</td><td>탐지 (음수/골짜기/급변/역전)</td><td>구현 완료</td></tr>
+  <tr><td>2</td><td>btm_score 피처 투입 (제외하지 않음, Ablation A/B/C 비교)</td><td>구현 완료</td></tr>
+  <tr><td>3</td><td>기상→BTM발전량 예측→실소비 복원 (2-stage)</td><td>설계+골격</td></tr>
+</table>
+
+<!-- ===== 역률 전략 ===== -->
+<h2>역률·TOU 추정 전략 — 5가지</h2>
+<table>
+  <tr><th>전략</th><th>방법</th><th>적용 조건 (부분월 안정성 상관 기준)</th></tr>
+  <tr><td>observed</td><td>관측 N일 값 연장</td><td>상관 0.95+</td></tr>
+  <tr><td>prev_month</td><td>전월 값 (래그)</td><td>관측 불안정</td></tr>
+  <tr><td>historical_mean</td><td>고객 과거 평균</td><td>래그 없을 때</td></tr>
+  <tr><td>seasonal_mean</td><td>같은 계절 평균</td><td>상관 0.85 미만</td></tr>
+  <tr><td>weighted_blend</td><td>관측 70% + 전월 30%</td><td>절충안</td></tr>
+</table>
+
+<!-- ===== 스케일 ===== -->
+<h2>스케일 아웃</h2>
+<table>
+  <tr><th>요소</th><th>설계</th></tr>
+  <tr><td>모델</td><td>글로벌 1개 — 고객 수 무관</td></tr>
+  <tr><td>피처 빌드</td><td>고객 청크 분할 (병렬 가능)</td></tr>
+  <tr><td>학습/추론</td><td>분리 — 추론은 배치 실행 (<code>predict_batch.py</code>)</td></tr>
+  <tr><td>설정</td><td>YAML — 소스 교체 시 코드 무수정</td></tr>
+</table>
+
+<!-- ===== 안전 ===== -->
+<h2>안전 장치</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">체크포인트</div>
+    <ul><li>각 Step 완료 시 자동 저장</li><li><code>--resume</code> 이어서 실행</li><li>진행률 바 + ETA</li><li>Ctrl+C 안전</li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">결과 이중 저장</div>
+    <ul><li>PNG + CSV + JSON 동시</li><li>이미지 깨져도 CSV로 복구</li><li>4종 폰트 순차 시도</li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">시간 형식 자동 보정</div>
+    <ul><li>00~23시: 그대로</li><li>24:00 표기: 00:00+1일</li><li>01~24시: 1시간 차감</li></ul>
+  </div>
+  <div class="card">
+    <div class="card-title">데이터 형식 자동 감지</div>
+    <ul><li>CSV (cp949/utf-8/euc-kr, 쉼표/탭/파이프)</li><li>Excel / Parquet</li><li>DB (Oracle/PostgreSQL)</li></ul>
+  </div>
+</div>
+
+<!-- ===== 소스 구조 ===== -->
+<h2>소스 모듈 구조 (27개 모듈 + 20개 스크립트)</h2>
+<div class="flow-box">src/                             scripts/
+  schemas.py                       run.py (대화형 실행기)
+  io_adapter.py                    inspect_lp.py / inspect_db.py
+  preprocess.py                    run_full_analysis.py (12 Step)
+  profiler.py (19개 통계)          ablation_study.py (Phase 2~3)
+  btm_detect.py                    tune_lgbm.py (Optuna)
+  eval.py / eval_detailed.py       sliding_eval.py
+  baselines.py                     predict_batch.py
+  tariff.py (2026.04.16)           compare_btm_strategies.py
+  tou.py                           compare_weather_versions.py
+  special_days.py                  select_features.py
+  feature_selection.py             build_representative_weather.py
+  billing_features.py              profile.py / run_baselines.py
+  checkpoint.py                    train_lgbm.py
+  result_saver.py                  prepare_ui_data.py
+  scale.py                         gen_synth.py
+  utils.py
+  models/
+    lgbm.py / explain.py / btm_solar.py
+  weather/
+    asos.py / aggregate.py / epw.py / optimize.py
+
+ui/app.py (Streamlit 4탭 대시보드)
+configs/ (YAML 설정)
+data/weather/ (ASOS 가중평균 5버전 + 8개 스테이션)</div>
+
+<div style="margin-top:32px; padding-bottom:200px; color:#999; font-size:0.75rem; text-align:center;">
+  AX 경진대회 2026 — 한국전력공사 지정과제 · 전기요금 과다발생 사전 예측모델 개발
+</div>
+
+</div>
+</body>
+</html>

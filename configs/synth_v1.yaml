@@ -1,0 +1,63 @@
+# 합성 LP 생성기 v1 — 프로파일러(공동주택 공공데이터) 결과로 보정
+#
+# 주요 변경 (vs synth.yaml v0):
+#   - noise_sigma 대폭 감소: 공동주택 격자 단위 월별 +30% 초과 발생률 ≈ 8.2%
+#     개별 가구는 변동 더 크므로 소폭 여유 — 주택용 목표 알림율 ≈ 15%, 일반용 ≈ 10%
+#   - CDD 계수: 공동주택 회귀 결과(1 kWh 부하 당 CDD 효과 30.8 kWh/°C)를 참고해
+#     주택용 CDD coef 를 0.045 → 0.070 으로 상향 (여름 냉방 지배적 신호 반영)
+#   - 기상 소스: EPW 서울 (실측 2022 기온) — v0 합성 기온보다 현실적
+schema_version: 1
+
+generator:
+  seed: 42
+  n_customers: 200
+  residential_ratio: 0.1428
+  start_date: "2022-01-01"
+  end_date: "2022-12-31"          # 1년 full 로 확장 — 알림 base rate 산정을 위해 최소 3개월 이상 필요
+  interval_min: 15
+  output:
+    path: "data/synth/lp_v1.parquet"
+    partition_by: ["customer_id"]
+
+residential:
+  base_kwh_per_15min: { dist: lognormal, mu: -2.6, sigma: 0.4 }
+  daily_peaks:
+    - { hour: 8,  multiplier: 1.4 }
+    - { hour: 20, multiplier: 1.8 }
+  night_trough: { hour: 3, multiplier: 0.5 }
+  weekend_multiplier: 1.1
+  holiday_multiplier: 1.1
+  weather:
+    cdd_base: 24.0
+    cdd_coef: 0.13          # 공동주택 회귀 CDD 감도(base 대비 ~12.7%/°C) 반영
+    hdd_base: 15.0
+    hdd_coef: 0.020
+  noise_sigma: 0.10         # 15분 단위 잡음 — 월 합계 변동은 weather 에서 주로 발생
+
+general:
+  base_kwh_per_15min: { dist: lognormal, mu: -0.5, sigma: 0.8 }
+  daily_peaks:
+    - { hour: 14, multiplier: 2.0 }
+  night_trough: { hour: 2, multiplier: 0.2 }
+  weekend_multiplier: 0.5
+  holiday_multiplier: 0.5
+  weather:
+    cdd_base: 24.0
+    cdd_coef: 0.09
+    hdd_base: 12.0
+    hdd_coef: 0.012
+  noise_sigma: 0.10
+
+power_factor: { mean: 0.92, std: 0.03, min: 0.7 }
+max_demand:   { multiplier_min: 1.1, multiplier_max: 1.5 }
+
+weather:
+  source: epw
+  epw_directory: "C:/Users/abc/Desktop/zero_shot/EPW_13개소"
+  station_id: "108"
+  mean_annual: 12.5
+  amplitude_annual: 25.0
+  daily_amplitude: 8.0
+
+calendar:
+  holidays_path: null

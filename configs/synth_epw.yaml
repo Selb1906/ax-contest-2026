@@ -1,0 +1,59 @@
+# 합성 LP 생성기 — 기상 소스를 EPW(AMY 2022) 로 교체한 변형
+# 기본 파라미터는 synth.yaml 과 동일. 차이는 weather 섹션만.
+schema_version: 1
+
+generator:
+  seed: 42
+  n_customers: 100
+  residential_ratio: 0.1428
+  start_date: "2022-01-01"
+  end_date: "2022-06-30"
+  interval_min: 15
+  output:
+    path: "data/synth/lp_v0_epw.parquet"
+    partition_by: ["customer_id"]
+
+residential:
+  base_kwh_per_15min: { dist: lognormal, mu: -2.6, sigma: 0.4 }
+  daily_peaks:
+    - { hour: 8,  multiplier: 1.4 }
+    - { hour: 20, multiplier: 1.8 }
+  night_trough: { hour: 3, multiplier: 0.5 }
+  weekend_multiplier: 1.1
+  holiday_multiplier: 1.1
+  weather:
+    cdd_base: 24.0
+    cdd_coef: 0.045
+    hdd_base: 15.0
+    hdd_coef: 0.025
+  noise_sigma: 0.15
+
+general:
+  base_kwh_per_15min: { dist: lognormal, mu: -0.5, sigma: 0.8 }
+  daily_peaks:
+    - { hour: 14, multiplier: 2.0 }
+  night_trough: { hour: 2, multiplier: 0.2 }
+  weekend_multiplier: 0.5
+  holiday_multiplier: 0.5
+  weather:
+    cdd_base: 24.0
+    cdd_coef: 0.060
+    hdd_base: 12.0
+    hdd_coef: 0.012
+  noise_sigma: 0.25
+
+power_factor: { mean: 0.92, std: 0.03, min: 0.7 }
+max_demand:   { multiplier_min: 1.1, multiplier_max: 1.5 }
+
+# 핵심 차이: 실측 2022 서울 기온을 주입
+weather:
+  source: epw
+  epw_directory: "C:/Users/abc/Desktop/zero_shot/EPW_13개소"
+  station_id: "108"     # 서울 (다른 도시 원하면 101/105/108/112/119/131/133/143/146/156/159/165/184)
+  # 범위 밖 fallback 용 합성 파라미터
+  mean_annual: 12.5
+  amplitude_annual: 25.0
+  daily_amplitude: 8.0
+
+calendar:
+  holidays_path: null

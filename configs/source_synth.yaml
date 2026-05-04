@@ -1,0 +1,3 @@
+source:
+  kind: synth
+  path: "data/synth/lp_v0.parquet"

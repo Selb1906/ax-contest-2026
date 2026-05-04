@@ -1,0 +1,493 @@
+"""안심구역 원스톱 분석 — 체크포인트 + 진행률 + 이중 저장.
+
+중단해도 이어서 실행 가능. 모든 결과는 CSV+PNG+JSON 이중 저장.
+
+사용법:
+  python -m scripts.run_full_analysis --source configs/source_dsz.yaml --train-end 2023-12
+  python -m scripts.run_full_analysis --source configs/source_dsz.yaml --resume  (이어서 실행)
+"""
+from __future__ import annotations
+
+import argparse
+import io as _stdio
+import json
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
+import numpy as np
+import pandas as pd
+
+from src import baselines, eval as ev, io_adapter, profiler
+from src.btm_detect import detect as btm_detect
+from src.checkpoint import CheckpointManager
+from src.models import lgbm
+from src.models.explain import run_full_explanation
+from src.preprocess import preprocess
+from src.result_saver import save_dataframe, save_chart, save_full_results
+from src.schemas import CUSTOMER_ID
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="안심구역 전체 분석 파이프라인")
+    parser.add_argument("--source", required=True, help="데이터 소스 YAML")
+    parser.add_argument("--train-end", default=None, help="학습 종료 기간 (예: 2023-12)")
+    parser.add_argument("--skip-profile", action="store_true")
+    parser.add_argument("--skip-shap", action="store_true")
+    parser.add_argument("--resume", action="store_true", help="체크포인트에서 이어서 실행")
+    parser.add_argument("--checkpoint-dir", default="checkpoints")
+    args = parser.parse_args()
+
+    ckpt = CheckpointManager(args.checkpoint_dir)
+    skip_done = args.resume
+
+    print("""
+╔══════════════════════════════════════════════════════╗
+║         전체 분석 파이프라인 시작                      ║
+╚══════════════════════════════════════════════════════╝""")
+    print(f"  소스: {args.source}")
+    print(f"  학습 종료: {args.train_end}")
+    print(f"  체크포인트: {args.checkpoint_dir}/ {'(이어서 실행)' if skip_done else '(새로 실행)'}")
+
+    # ────────────────────────────────────────────
+    # STEP 1: 데이터 로딩
+    # ────────────────────────────────────────────
+    with ckpt.step("step1_load", skip_if_done=False) as prog:
+        df = io_adapter.load_from_yaml(args.source, validate=False)
+        n_cust = df["customer_id"].nunique()
+        prog.update(label=f"rows={len(df):,}  customers={n_cust}")
+        prog.update(label=f"columns: {list(df.columns)}")
+        prog.update(label=f"ts: {df['ts'].min()} ~ {df['ts'].max()}")
+        ckpt.save_intermediate("step1_load_summary", {
+            "rows": len(df), "customers": n_cust,
+            "columns": list(df.columns),
+            "ts_min": str(df["ts"].min()), "ts_max": str(df["ts"].max()),
+        })
+
+    # ────────────────────────────────────────────
+    # STEP 1.5: 전처리
+    # ────────────────────────────────────────────
+    with ckpt.step("step1_5_preprocess", skip_if_done=skip_done) as prog:
+        df, prep_log = preprocess(df)
+        for s in prep_log.steps:
+            prog.update(label=f"{s['step']}: {s['detail']}")
+        summary = prep_log.summary()
+        prog.update(label=f"최종: {summary['original_rows']:,} → {summary['final_rows']:,} "
+                          f"({summary['removal_rate']*100:.2f}% 제거)")
+        ckpt.save_intermediate("preprocess_log", summary)
+        Path("preprocess_log").mkdir(exist_ok=True)
+        with open("preprocess_log/log.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    # ────────────────────────────────────────────
+    # STEP 2: BTM 탐지
+    # ────────────────────────────────────────────
+    with ckpt.step("step2_btm", skip_if_done=skip_done) as prog:
+        btm_result = btm_detect(df)
+        n_btm = btm_result.summary["n_btm_detected"]
+        prog.update(label=f"BTM: {n_btm}명 ({btm_result.summary['btm_rate']*100:.1f}%)")
+
+        Path("btm_results").mkdir(exist_ok=True)
+        save_dataframe(btm_result.customer_flags, "btm_results", "btm_flags", "고객별 BTM 플래그 (반출불가)")
+        with open("btm_results/btm_summary.json", "w", encoding="utf-8") as f:
+            json.dump(btm_result.summary, f, ensure_ascii=False, indent=2)
+        ckpt.save_intermediate("btm_summary", btm_result.summary)
+
+    # BTM 피처 병합
+    btm_flags = btm_result.customer_flags[["customer_id", "is_btm", "btm_score"]].copy()
+    df = df.merge(btm_flags, on="customer_id", how="left")
+    df["is_btm"] = df["is_btm"].fillna(0).astype(int)
+    df["btm_score"] = df["btm_score"].fillna(0.0)
+    print(f"  BTM 피처 병합 완료 (is_btm + btm_score)")
+
+    # ────────────────────────────────────────────
+    # STEP 3: 프로파일러
+    # ────────────────────────────────────────────
+    if not args.skip_profile:
+        with ckpt.step("step3_profiler", total=19, skip_if_done=skip_done) as prog:
+            profiler.run(df, "profile_stats/dsz")
+    else:
+        print("\n[skip] 프로파일러")
+
+    # ────────────────────────────────────────────
+    # STEP 4: 베이스라인
+    # ────────────────────────────────────────────
+    with ckpt.step("step4_baselines", total=5, skip_if_done=skip_done) as prog:
+        daily = ev.daily_by_customer(df)
+        monthly = ev.monthly_by_customer(daily)
+        horizon = ev.build_horizon_table(daily, horizons=(10, 20))
+        ctx = ev.attach_alarm_context(horizon, monthly)
+
+        baseline_rows = []
+        for name, fn in baselines.BASELINES.items():
+            try:
+                pred = fn(monthly, horizon)
+                m = ev.evaluate(pred, ctx)
+                m.insert(0, "model", name)
+                baseline_rows.append(m)
+                if "mape_pct" in m.columns and len(m) > 0:
+                    mape_avg = m["mape_pct"].mean()
+                    prog.update(1, label=f"{name}: MAPE {mape_avg:.2f}%")
+                else:
+                    prog.update(1, label=f"{name}: 평가 데이터 부족")
+            except Exception as e:
+                prog.update(1, label=f"{name}: 실패 ({e})")
+
+        baseline_metrics = pd.concat(baseline_rows, ignore_index=True)
+        save_dataframe(baseline_metrics, "eval_results", "baselines", "베이스라인 5종 평가")
+        ckpt.save_intermediate("baselines", baseline_metrics)
+
+    # ────────────────────────────────────────────
+    # STEP 5: LightGBM 학습
+    # ────────────────────────────────────────────
+    with ckpt.step("step5_lgbm", skip_if_done=skip_done) as prog:
+        prog.update(label="피처 빌드 중...")
+        features, spec = lgbm.build_features(df)
+        prog.update(label=f"피처: {len(spec.all)}개, 행: {len(features):,}")
+
+        train_end = pd.Period(args.train_end, freq="M") if args.train_end else None
+        prog.update(label="학습 중...")
+        train_end_p = pd.Period(args.train_end, freq="M") if args.train_end else None
+        if train_end_p is None:
+            max_ym = features["year_month"].max()
+            train_end_p = pd.Period(f"{max_ym.year - 1}-12", freq="M")
+        n_train = (features["year_month"] <= train_end_p).sum()
+        n_test = (features["year_month"] > train_end_p).sum()
+        prog.update(label=f"train={n_train:,}  test={n_test:,}  train_end={train_end_p}")
+        if n_train == 0:
+            prog.update(label="학습 데이터 0건 — train_end를 확인하세요")
+            raise ValueError(f"train=0: 데이터가 {features['year_month'].min()}~{features['year_month'].max()} 인데 train_end={train_end_p}")
+        booster, test_preds = lgbm.train(features, spec, train_end=train_end)
+
+        lgbm_metrics = ev.evaluate(test_preds, ctx)
+        lgbm_metrics.insert(0, "model", "lightgbm")
+        mape_str = ", ".join(
+            f"+{int(r['horizon_days'])}d {r['mape_pct']:.2f}%"
+            for _, r in lgbm_metrics.iterrows()
+        )
+        prog.update(label=f"lightgbm: {mape_str}")
+
+        all_metrics = pd.concat([baseline_metrics, lgbm_metrics], ignore_index=True)
+        save_full_results(
+            "eval_results", all_metrics,
+            params={"features": spec.all, "train_end": str(train_end)},
+            description="전체 모델 평가",
+        )
+        lgbm.save(booster, spec, "weights/dsz_lgbm", notes="안심구역 실 LP 학습")
+        ckpt.save_intermediate("all_metrics", all_metrics)
+        ckpt.save_intermediate("lgbm_preds", test_preds)
+
+    # ────────────────────────────────────────────
+    # STEP 5.5: Sliding 상세 평가 (기본)
+    # ────────────────────────────────────────────
+    with ckpt.step("step5_5_sliding", total=6, skip_if_done=skip_done) as prog:
+        from src.eval_detailed import error_by_dimension, save_detailed_evaluation
+        from src.schemas import CUSTOMER_ID as _CID
+
+        train_end_p = pd.Period(args.train_end, freq="M") if args.train_end else None
+        if train_end_p is None:
+            max_ym = features["year_month"].max()
+            train_end_p = pd.Period(f"{max_ym.year - 1}-12", freq="M")
+
+        test_features = features[features["year_month"] > train_end_p].copy()
+        for c in spec.categorical:
+            if c in test_features.columns:
+                test_features[c] = test_features[c].astype("category")
+
+        sliding_meter_days = [1, 5, 10, 15, 20, 25]
+        sliding_results = []
+
+        for md in sliding_meter_days:
+            try:
+                horizon_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
+                ctx_md = ev.attach_alarm_context(horizon_md, monthly)
+
+                pred_vals = booster.predict(
+                    test_features[spec.all], num_iteration=booster.best_iteration
+                )
+                pred_df = test_features[[_CID, "year_month", "horizon_days"]].copy()
+                pred_df["pred_monthly_kwh"] = pred_vals
+
+                merged = ctx_md.merge(
+                    pred_df, on=[_CID, "year_month", "horizon_days"], how="inner"
+                )
+                merged["meter_day"] = md
+                merged["error"] = merged["pred_monthly_kwh"] - merged["full_month_kwh"]
+                merged["abs_error"] = merged["error"].abs()
+                merged["pct_error"] = merged["abs_error"] / merged["full_month_kwh"].clip(lower=1e-9) * 100
+                merged["month"] = merged["year_month"].apply(lambda x: x.month)
+
+                mape = merged["pct_error"].mean()
+                prog.update(1, label=f"검침일={md}: MAPE {mape:.3f}%, {len(merged)}건")
+                sliding_results.append(merged)
+            except Exception as e:
+                prog.update(1, label=f"검침일={md}: 실패 ({e})")
+
+        if sliding_results:
+            all_sliding = pd.concat(sliding_results, ignore_index=True)
+            dims = save_detailed_evaluation(all_sliding, "sliding_results")
+            ckpt.save_intermediate("sliding_overall", dims.get("overall", pd.DataFrame()))
+
+    # ────────────────────────────────────────────
+    # STEP 6: SHAP 분석
+    # ────────────────────────────────────────────
+    if not args.skip_shap:
+        with ckpt.step("step6_shap", skip_if_done=skip_done) as prog:
+            test_mask = features["year_month"] > (train_end if train_end else pd.Period("2099-12", freq="M"))
+            test_features = features[test_mask] if test_mask.any() else features.tail(500)
+
+            alarm_df = None
+            if len(test_preds) > 0:
+                merged = test_preds.merge(ctx, on=["customer_id", "year_month", "horizon_days"], how="left")
+                merged["is_alarm"] = False
+                if "prev_month_kwh" in merged.columns:
+                    c1 = merged["pred_monthly_kwh"] > merged["prev_month_kwh"] * 1.30
+                    c2 = merged["pred_monthly_kwh"] > merged.get("yoy_month_kwh", pd.Series(dtype=float)) * 1.30
+                    c3 = merged["pred_monthly_kwh"] > merged.get("ma3_kwh", pd.Series(dtype=float)) * 1.50
+                    merged["is_alarm"] = c1.fillna(False) | c2.fillna(False) | c3.fillna(False)
+                alarm_df = merged[["is_alarm"]].reset_index(drop=True)
+
+            prog.update(label="SHAP 산출 중... (시간 소요)")
+            results = run_full_explanation(
+                booster, test_features, spec, "explain_results", alarm_labels=alarm_df
+            )
+            prog.update(label=f"산출물: {list(results.keys())}")
+            ckpt.save_intermediate("shap_results", results)
+    else:
+        print("\n[skip] SHAP 분석")
+
+    # ────────────────────────────────────────────
+    # STEP 7: 기상 최적화
+    # ────────────────────────────────────────────
+    with ckpt.step("step7_weather_opt", skip_if_done=skip_done) as prog:
+        try:
+            from src.weather.asos import read_asos_directory, monthly_weather_features
+            from src.weather.optimize import run_weather_optimization
+
+            asos_dir = Path("data/weather/asos")
+            if not asos_dir.exists():
+                asos_dir = Path("ASOS")
+            if asos_dir.exists():
+                prog.update(label="ASOS 로드 중...")
+                asos_df = read_asos_directory(asos_dir)
+                station_feats = monthly_weather_features(asos_df)
+                monthly_with_ct = monthly.copy()
+                if "contract_type" not in monthly_with_ct.columns:
+                    cust_ct = df[["customer_id", "contract_type"]].drop_duplicates()
+                    monthly_with_ct = monthly_with_ct.merge(cust_ct, on="customer_id", how="left")
+                prog.update(label="최적화 실행 중...")
+                opt_results = run_weather_optimization(
+                    asos_df, monthly_with_ct, station_feats, out_dir="weather_opt"
+                )
+                ckpt.save_intermediate("weather_opt", opt_results)
+            else:
+                prog.update(label="ASOS 디렉터리 미발견 — 스킵")
+        except Exception as e:
+            prog.update(label=f"기상 최적화 실패: {e}")
+
+    # ────────────────────────────────────────────
+    # STEP 8: 기상 민감도
+    # ────────────────────────────────────────────
+    if not args.skip_shap:
+        with ckpt.step("step8_sensitivity", skip_if_done=skip_done) as prog:
+            try:
+                from src.weather.asos import weather_sensitivity_analysis
+                weather_cols = [c for c in spec.all if any(
+                    k in c for k in ["cdh", "hdh", "temp", "hdd", "cdd"]
+                )]
+                if weather_cols and len(test_features) > 0:
+                    def predict_fn(X):
+                        X_copy = X.copy()
+                        for c in spec.categorical:
+                            X_copy[c] = X_copy[c].astype("category")
+                        return booster.predict(X_copy[spec.all], num_iteration=booster.best_iteration)
+
+                    sensitivity = weather_sensitivity_analysis(
+                        predict_fn, test_features, weather_cols
+                    )
+                    save_dataframe(sensitivity, "weather_opt", "sensitivity", "기상 민감도 분석")
+                    for _, row in sensitivity.iterrows():
+                        prog.update(label=f"{row['source']:>15s}: MAPE {row['mape_pct']:.3f}%")
+                else:
+                    prog.update(label="기상 피처 없음 — 스킵")
+            except Exception as e:
+                prog.update(label=f"민감도 실패: {e}")
+
+    # ────────────────────────────────────────────
+    # STEP 9: 스케일 아웃
+    # ────────────────────────────────────────────
+    with ckpt.step("step9_scale", skip_if_done=skip_done) as prog:
+        try:
+            from src.scale import estimate_scale_metrics
+            scale_metrics = estimate_scale_metrics(df)
+            cur = scale_metrics["current"]
+            prog.update(label=f"현재: {cur['n_customers']:,}호, {cur['memory_mb']:.0f}MB")
+            for target, proj in scale_metrics["projections"].items():
+                prog.update(label=f"{target}: ~{proj['estimated_memory_gb']}GB, ~{proj['estimated_time_min']:.0f}분")
+            Path("scale_report").mkdir(exist_ok=True)
+            with open("scale_report/metrics.json", "w", encoding="utf-8") as f:
+                json.dump(scale_metrics, f, ensure_ascii=False, indent=2, default=str)
+            ckpt.save_intermediate("scale_metrics", scale_metrics)
+        except Exception as e:
+            prog.update(label=f"스케일 지표 실패: {e}")
+
+    # ────────────────────────────────────────────
+    # STEP 10: Ablation Study — 최적 조합 탐색
+    # ────────────────────────────────────────────
+    with ckpt.step("step10_ablation", skip_if_done=skip_done) as prog:
+        try:
+            import subprocess
+            prog.update(label="Ablation Study 실행 중...")
+            train_end_str = args.train_end or f"{features['year_month'].max().year - 1}-12"
+            result = subprocess.run(
+                [sys.executable, "-m", "scripts.ablation_study",
+                 "--source", args.source, "--train-end", train_end_str],
+                capture_output=False,
+            )
+            if result.returncode == 0:
+                # 최적 설정 로드
+                opt_path = Path("ablation_results/optimal_config.json")
+                if opt_path.exists():
+                    with open(opt_path, encoding="utf-8") as f:
+                        optimal_config = json.load(f)
+                    prog.update(label=f"최적 설정: {optimal_config}")
+                else:
+                    optimal_config = None
+                    prog.update(label="최적 설정 파일 없음 — 기본값 유지")
+            else:
+                optimal_config = None
+                prog.update(label="Ablation 실패 — 기본값 유지")
+        except Exception as e:
+            optimal_config = None
+            prog.update(label=f"Ablation 실패: {e}")
+
+    # ────────────────────────────────────────────
+    # STEP 11: 최적 조합으로 재학습 + 피처 자동 선정
+    # ────────────────────────────────────────────
+    with ckpt.step("step11_retrain_optimal", skip_if_done=skip_done) as prog:
+        if optimal_config and optimal_config != {}:
+            prog.update(label="최적 설정으로 재학습 중...")
+
+            # 피처 선택이 최적이면 auto_select 적용
+            if optimal_config.get("feature_selection", False):
+                from src.feature_selection import auto_select_features, print_selection_report
+                prog.update(label="피처 자동 선정 중...")
+                sel_result = auto_select_features(
+                    features, spec.numeric, "full_month_kwh",
+                    corr_threshold=0.85, vif_threshold=10.0,
+                )
+                print_selection_report(sel_result)
+                save_dataframe(sel_result.ranking, "feature_selection", "ranking", "피처 순위")
+
+                # 선택되지 않은 피처 NaN
+                features_opt = features.copy()
+                for c in spec.numeric:
+                    if c not in sel_result.selected:
+                        features_opt[c] = np.nan
+                prog.update(label=f"선정 피처: {len(sel_result.selected)}개 / {len(spec.numeric)}개")
+            else:
+                features_opt = features
+                prog.update(label="피처 선택 OFF — 전체 피처 유지")
+
+            # 재학습
+            train_end_p = pd.Period(args.train_end, freq="M") if args.train_end else None
+            booster_opt, preds_opt = lgbm.train(features_opt, spec, train_end=train_end_p)
+            lgbm.save(booster_opt, spec, "weights/dsz_lgbm_optimal",
+                      notes=f"Ablation 최적: {optimal_config}")
+
+            # 재평가 (sliding)
+            prog.update(label="최적 모델 Sliding 재평가 중...")
+            test_opt = features_opt[features_opt["year_month"] > train_end_p].copy()
+            for c in spec.categorical:
+                if c in test_opt.columns:
+                    test_opt[c] = test_opt[c].astype("category")
+
+            opt_sliding = []
+            for md in [1, 5, 10, 15, 20, 25]:
+                try:
+                    h_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
+                    ctx_md = ev.attach_alarm_context(h_md, monthly)
+                    pred_vals = booster_opt.predict(
+                        test_opt[spec.all], num_iteration=booster_opt.best_iteration
+                    )
+                    pred_df = test_opt[[CUSTOMER_ID, "year_month", "horizon_days"]].copy()
+                    pred_df["pred_monthly_kwh"] = pred_vals
+                    merged = ctx_md.merge(pred_df, on=[CUSTOMER_ID, "year_month", "horizon_days"], how="inner")
+                    merged["meter_day"] = md
+                    merged["error"] = merged["pred_monthly_kwh"] - merged["full_month_kwh"]
+                    merged["pct_error"] = merged["error"].abs() / merged["full_month_kwh"].clip(lower=1e-9) * 100
+                    opt_sliding.append(merged)
+                except Exception:
+                    pass
+
+            if opt_sliding:
+                from src.eval_detailed import save_detailed_evaluation
+                all_opt = pd.concat(opt_sliding, ignore_index=True)
+                dims_opt = save_detailed_evaluation(all_opt, "sliding_results_optimal")
+                ckpt.save_intermediate("optimal_sliding", dims_opt.get("overall", pd.DataFrame()))
+        else:
+            prog.update(label="Ablation 미실행 — 기본 모델 유지")
+
+    # ────────────────────────────────────────────
+    # STEP 12: 하이퍼파라미터 튜닝
+    # ────────────────────────────────────────────
+    with ckpt.step("step12_tuning", skip_if_done=skip_done) as prog:
+        try:
+            prog.update(label="Optuna 튜닝 시작 (10분 타임아웃)...")
+            import subprocess
+            train_end_str = args.train_end or f"{features['year_month'].max().year - 1}-12"
+            result = subprocess.run(
+                [sys.executable, "-m", "scripts.tune_lgbm",
+                 "--source", args.source, "--train-end", train_end_str,
+                 "--timeout", "600", "--n-trials", "50"],
+                capture_output=False,
+            )
+            if result.returncode == 0:
+                prog.update(label="튜닝 완료 — weights/dsz_lgbm_tuned/")
+            else:
+                prog.update(label="튜닝 실패 또는 시간 초과")
+        except Exception as e:
+            prog.update(label=f"튜닝 실패: {e}")
+
+    # ────────────────────────────────────────────
+    # 완료
+    # ────────────────────────────────────────────
+    elapsed = time.time() - ckpt.progress.start_time if ckpt.progress.start_time else 0
+
+    print(f"""
+╔══════════════════════════════════════════════════════╗
+║                    전체 완료                          ║
+╚══════════════════════════════════════════════════════╝
+
+  소요 시간: {elapsed/60:.1f}분
+  체크포인트: {args.checkpoint_dir}/
+
+  반출 대상:
+    profile_stats/dsz/       — 프로파일러 19개 통계
+    preprocess_log/          — 전처리 로그
+    btm_results/             — BTM 탐지 + 전략 비교
+    eval_results/            — 모델 평가 (기본값)
+    sliding_results/         — Sliding 상세 평가 (기본값)
+    sliding_results_optimal/ — Sliding 상세 평가 (최적 조합)
+    ablation_results/        — Ablation Study
+    feature_selection/       — 피처 선정 근거
+    weights/dsz_lgbm/        — 기본 모델
+    weights/dsz_lgbm_optimal/ — 최적 조합 모델
+    weights/dsz_lgbm_tuned/  — 튜닝 모델
+    tuning_results/          — 튜닝 이력
+    explain_results/         — SHAP (PNG + CSV)
+    weather_opt/             — 기상 최적화 + 민감도
+    scale_report/            — 스케일 아웃 지표
+
+  반출 불가:
+    btm_results/btm_flags.csv (고객별)
+    checkpoints/ (중간 결과)
+""")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
