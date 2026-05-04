@@ -97,9 +97,13 @@ def attach_weather(horizon, config):
     return horizon
 
 
+SLIDING_METER_DAYS = [1, 5, 10, 15, 20, 25]
+
+
 def run_single_experiment(df, config, train_end):
-    """단일 설정으로 LightGBM 학습 + 평가."""
+    """단일 설정으로 LightGBM 학습 + Sliding 평가."""
     from src.models.lgbm import build_features, train
+    from src.eval import regression_metrics
 
     features, spec = build_features(df)
 
@@ -123,39 +127,82 @@ def run_single_experiment(df, config, train_end):
             corr_threshold=config.corr_threshold,
             vif_threshold=config.vif_threshold,
         )
-        # 선택되지 않은 피처 NaN
         for c in spec.numeric:
             if c not in result.selected:
                 features[c] = np.nan
 
-    # 학습
+    # 학습 (1번)
     features_clean = features.dropna(subset=["full_month_kwh", "partial_kwh"])
     n_train = (features_clean["year_month"] <= train_end).sum()
     if n_train == 0:
         return None
 
-    booster, test_preds = train(features_clean, spec, train_end=train_end)
+    booster, _ = train(features_clean, spec, train_end=train_end)
 
-    # 평가
+    # Sliding 평가 (학습 안 함, 예측만 검침일별 반복)
     daily = ev.daily_by_customer(df)
     monthly = ev.monthly_by_customer(daily)
-    horizon = ev.build_horizon_table(daily, horizons=(10, 20))
-    ctx = ev.attach_alarm_context(horizon, monthly)
-    metrics = ev.evaluate(test_preds, ctx)
 
-    if len(metrics) == 0 or "mape_pct" not in metrics.columns:
+    test_features = features_clean[features_clean["year_month"] > train_end].copy()
+    for c in spec.categorical:
+        if c in test_features.columns:
+            test_features[c] = test_features[c].astype("category")
+
+    if len(test_features) == 0:
         return None
+
+    all_errors = []
+    for md in SLIDING_METER_DAYS:
+        try:
+            horizon = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
+            ctx = ev.attach_alarm_context(horizon, monthly)
+            pred_vals = booster.predict(test_features[spec.all], num_iteration=booster.best_iteration)
+            pred_df = test_features[["customer_id", "year_month", "horizon_days"]].copy()
+            pred_df["pred_monthly_kwh"] = pred_vals
+
+            merged = ctx.merge(pred_df, on=["customer_id", "year_month", "horizon_days"], how="inner")
+            if len(merged) == 0:
+                continue
+            errors = np.abs(merged["pred_monthly_kwh"].values - merged["full_month_kwh"].values)
+            pct_errors = errors / merged["full_month_kwh"].clip(lower=1e-9).values * 100
+            all_errors.extend(pct_errors.tolist())
+        except Exception:
+            pass
+
+    if not all_errors:
+        return None
+
+    all_errors = np.array(all_errors)
+    y_true_all = []
+    y_pred_all = []
+    # 전체 regression metrics도 산출
+    for md in SLIDING_METER_DAYS:
+        try:
+            horizon = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
+            ctx = ev.attach_alarm_context(horizon, monthly)
+            pred_vals = booster.predict(test_features[spec.all], num_iteration=booster.best_iteration)
+            pred_df = test_features[["customer_id", "year_month", "horizon_days"]].copy()
+            pred_df["pred_monthly_kwh"] = pred_vals
+            merged = ctx.merge(pred_df, on=["customer_id", "year_month", "horizon_days"], how="inner")
+            if len(merged) > 0:
+                y_true_all.extend(merged["full_month_kwh"].tolist())
+                y_pred_all.extend(merged["pred_monthly_kwh"].tolist())
+        except Exception:
+            pass
+
+    reg = regression_metrics(np.array(y_true_all), np.array(y_pred_all))
 
     return {
         "name": config.name,
         "config": config.describe(),
-        "mape_mean": float(metrics["mape_pct"].mean()),
-        "mape_10d": float(metrics[metrics["horizon_days"] == 10]["mape_pct"].mean())
-            if 10 in metrics["horizon_days"].values else None,
-        "mape_20d": float(metrics[metrics["horizon_days"] == 20]["mape_pct"].mean())
-            if 20 in metrics["horizon_days"].values else None,
-        "f1_mean": float(metrics["alarm_f1"].mean()),
-        "n_test": int(metrics["n"].sum()),
+        "mape_mean": float(reg.get("mape_pct", np.nan)),
+        "nrmse_pct": float(reg.get("nrmse_pct", np.nan)),
+        "rmse": float(reg.get("rmse", np.nan)),
+        "mae": float(reg.get("mae", np.nan)),
+        "bias": float(reg.get("bias", np.nan)),
+        "std_error": float(reg.get("std_error", np.nan)),
+        "n_test": int(reg.get("n", 0)),
+        "n_sliding_days": len(SLIDING_METER_DAYS),
     }
 
 
