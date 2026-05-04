@@ -150,19 +150,47 @@ def main() -> int:
         ckpt.save_intermediate("baselines", baseline_metrics)
 
     # ────────────────────────────────────────────
+    # STEP 4.5: 데이터 분할 + 누수 체크
+    # ────────────────────────────────────────────
+    with ckpt.step("step4_5_split", skip_if_done=skip_done) as prog:
+        from src.split import time_split, suggest_split, check_leakage
+
+        features_pre, spec = lgbm.build_features(df)
+        prog.update(label=f"피처: {len(spec.all)}개, 행: {len(features_pre):,}")
+
+        if args.train_end:
+            train_end_p = pd.Period(args.train_end, freq="M")
+            # val_end 자동 설정: train_end + 6개월
+            val_end_p = train_end_p + 6
+            max_ym = features_pre["year_month"].max()
+            if val_end_p >= max_ym:
+                val_end_p = None  # val 없이 train/test만
+        else:
+            train_end_p, val_end_p = suggest_split(features_pre)
+
+        splits = time_split(features_pre, train_end_p, val_end_p)
+        leakage_warnings = check_leakage(features_pre, splits)
+        if leakage_warnings:
+            prog.update(label=f"누수 경고 {len(leakage_warnings)}건!")
+        else:
+            prog.update(label="누수 체크 통과")
+
+        ckpt.save_intermediate("split_info", {
+            "train_end": str(train_end_p),
+            "val_end": str(val_end_p) if val_end_p else None,
+            "train_n": int(splits["train"].sum()),
+            "val_n": int(splits["val"].sum()),
+            "test_n": int(splits["test"].sum()),
+            "leakage_warnings": leakage_warnings,
+        })
+
+    # ────────────────────────────────────────────
     # STEP 5: LightGBM 학습
     # ────────────────────────────────────────────
-    with ckpt.step("step5_lgbm", skip_if_done=skip_done) as prog:
-        prog.update(label="피처 빌드 중...")
-        features, spec = lgbm.build_features(df)
-        prog.update(label=f"피처: {len(spec.all)}개, 행: {len(features):,}")
+    features = features_pre  # Step 4.5에서 빌드한 것 재사용
 
-        train_end = pd.Period(args.train_end, freq="M") if args.train_end else None
-        prog.update(label="학습 중...")
-        train_end_p = pd.Period(args.train_end, freq="M") if args.train_end else None
-        if train_end_p is None:
-            max_ym = features["year_month"].max()
-            train_end_p = pd.Period(f"{max_ym.year - 1}-12", freq="M")
+    with ckpt.step("step5_lgbm", skip_if_done=skip_done) as prog:
+        train_end = train_end_p  # 분할에서 확정된 값
         n_train = (features["year_month"] <= train_end_p).sum()
         n_test = (features["year_month"] > train_end_p).sum()
         prog.update(label=f"train={n_train:,}  test={n_test:,}  train_end={train_end_p}")
@@ -423,6 +451,40 @@ def main() -> int:
             prog.update(label="Ablation 미실행 — 기본 모델 유지")
 
     # ────────────────────────────────────────────
+    # STEP 11.5: 잔차 보정 (2-stage Ridge)
+    # ────────────────────────────────────────────
+    with ckpt.step("step11_5_residual", skip_if_done=skip_done) as prog:
+        try:
+            from src.residual_correction import run_residual_correction
+            prog.update(label="잔차 보정 모델 학습 중...")
+
+            # 최적 모델(또는 기본 모델)의 예측값과 실측값
+            best_booster = booster  # 기본 모델
+            opt_model_path = Path("weights/dsz_lgbm_optimal/model.txt")
+            if opt_model_path.exists():
+                best_booster, _ = lgbm.load("weights/dsz_lgbm_optimal")
+                prog.update(label="최적 모델 기반 잔차 보정")
+
+            feat_clean = features.dropna(subset=["full_month_kwh", "partial_kwh"]).copy()
+            for c in spec.categorical:
+                if c in feat_clean.columns:
+                    feat_clean[c] = feat_clean[c].astype("category")
+
+            pred_all = best_booster.predict(
+                feat_clean[spec.all], num_iteration=best_booster.best_iteration
+            )
+            actual_all = feat_clean["full_month_kwh"].values
+            train_mask_arr = (feat_clean["year_month"] <= train_end_p).values
+
+            res_result = run_residual_correction(
+                feat_clean, pred_all, actual_all, train_mask_arr,
+                out_dir="residual_correction"
+            )
+            ckpt.save_intermediate("residual_correction", res_result)
+        except Exception as e:
+            prog.update(label=f"잔차 보정 실패: {e}")
+
+    # ────────────────────────────────────────────
     # STEP 12: 하이퍼파라미터 튜닝
     # ────────────────────────────────────────────
     with ckpt.step("step12_tuning", skip_if_done=skip_done) as prog:
@@ -530,6 +592,7 @@ def main() -> int:
     sliding_results/         — Sliding 상세 평가 (기본값)
     sliding_results_optimal/ — Sliding 상세 평가 (최적 조합)
     sliding_results_tuned/   — Sliding 상세 평가 (튜닝 모델)
+    residual_correction/     — 잔차 보정 결과 + 패턴 분석
     ablation_results/        — Ablation Study
     feature_selection/       — 피처 선정 근거
     weights/dsz_lgbm/        — 기본 모델
