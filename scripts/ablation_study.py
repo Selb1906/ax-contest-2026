@@ -234,10 +234,15 @@ def main() -> int:
         best_per_factor["btm_mode"] = "score"
         print("\n  --- BTM: 미발견, 스킵 ---")
 
-    # 2b. 기상 가중치
+    # 2b. 기상 가중치 (기존 5개 + 8스테이션 + Step7 LP역산/계절별)
     weather_versions = ["national_v1_paper", "national_v2_power", "national_v3_population",
                         "national_v4_equal", "national_v5_seoul"]
     available_weather = [v for v in weather_versions if (Path("data/weather") / f"{v}.csv").exists()]
+
+    # Step 7에서 LP 역산·계절별 가중치로 만든 CSV가 있으면 추가
+    for extra in ["national_lp_regression", "national_seasonal_summer", "national_seasonal_winter"]:
+        if (Path("data/weather") / f"{extra}.csv").exists():
+            available_weather.append(extra)
 
     if available_weather:
         print("\n  --- 기상 가중치 ---")
@@ -249,7 +254,8 @@ def main() -> int:
             if r:
                 all_results.append(r)
                 delta = r["mape_mean"] - baseline_mape
-                print(f"    weather={wv}: MAPE {r['mape_mean']:.3f}% ({delta:+.3f}%)")
+                tag = " (LP역산)" if "regression" in wv else " (계절별)" if "seasonal" in wv else ""
+                print(f"    weather={wv}{tag}: MAPE {r['mape_mean']:.3f}% ({delta:+.3f}%)")
                 if r["mape_mean"] < weather_best[1]:
                     weather_best = (wv, r["mape_mean"])
         best_per_factor["weather_version"] = weather_best[0]

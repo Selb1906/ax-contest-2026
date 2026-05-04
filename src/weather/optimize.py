@@ -296,4 +296,29 @@ def run_weather_optimization(
             json.dump(all_results, f, ensure_ascii=False, indent=2, default=str)
         print(f"\n[saved] {p / 'weather_optimization.json'}")
 
+    # LP 역산 가중치로 대표기상 CSV 생성 → Ablation 비교 대상
+    from .asos import weighted_national_average
+    weather_dir = Path("data/weather")
+    weather_dir.mkdir(parents=True, exist_ok=True)
+
+    if "weights" in w_cooling and w_cooling.get("r_squared", 0) > 0:
+        try:
+            lp_weights = {int(k): v for k, v in w_cooling["weights"].items()}
+            avg_lp = weighted_national_average(station_features, lp_weights)
+            avg_lp.to_csv(weather_dir / "national_lp_regression.csv", index=False, encoding="utf-8-sig")
+            print(f"[saved] data/weather/national_lp_regression.csv (LP역산 가중치)")
+        except Exception as e:
+            print(f"  LP역산 CSV 생성 실패: {e}")
+
+    for season_key, season_result in seasonal.items():
+        if "weights" in season_result and season_result.get("r_squared", 0) > 0:
+            try:
+                s_weights = {int(k): v for k, v in season_result["weights"].items()}
+                avg_s = weighted_national_average(station_features, s_weights)
+                fname = f"national_seasonal_{season_key}.csv"
+                avg_s.to_csv(weather_dir / fname, index=False, encoding="utf-8-sig")
+                print(f"[saved] data/weather/{fname} (계절별 {season_key})")
+            except Exception:
+                pass
+
     return all_results

@@ -200,11 +200,20 @@
     </table>
   </div>
   <div class="card">
-    <div class="card-title">기상 가중치 <span class="badge b-blue">6가지</span></div>
+    <div class="card-title">기상 가중치 <span class="badge b-blue">8가지+</span></div>
     <table>
-      <tr><td>v1 논문</td><td>v2 판매량</td><td>v3 인구</td></tr>
-      <tr><td>v4 균등</td><td>v5 서울</td><td>8stn 개별</td></tr>
+      <tr><th>기존 방식</th><th>설명</th></tr>
+      <tr><td>v1 논문</td><td>임종훈 외 (2013) 개선 인구 기준</td></tr>
+      <tr><td>v2 판매량</td><td>전력판매량 기준</td></tr>
+      <tr><td>v3 인구</td><td>인구수 기준</td></tr>
+      <tr><td>v4 균등</td><td>8개 도시 균등</td></tr>
+      <tr><td>v5 서울</td><td>서울 단일 (수도권 집중)</td></tr>
+      <tr><td>8stn</td><td>8개 스테이션 개별 피처</td></tr>
+      <tr><th>우리 방법 (신규)</th><th></th></tr>
+      <tr><td>LP 역산</td><td>실 LP-기온 회귀로 가중치 직접 추정</td></tr>
+      <tr><td>계절별 분리</td><td>여름(CDH)/겨울(HDH) 가중치 별도</td></tr>
     </table>
+    <div class="desc">Step 7(OLS)에서 LP 역산·계절별 최적 가중치를 산출한 뒤, Ablation에서 기존 방식과 함께 LightGBM으로 정밀 비교</div>
   </div>
   <div class="card">
     <div class="card-title">기준온도 <span class="badge b-orange">Step 7 연동</span></div>
