@@ -44,6 +44,51 @@
 <h1>전기요금 과다발생 사전 예측모델</h1>
 <div class="subtitle">2026 AX 아이디어 경진대회 — 한국전력공사 지정과제 | 파이프라인 상세 개요</div>
 
+<!-- ===== 과제 소개 ===== -->
+<div class="card" style="border-left:4px solid #0984e3; margin-bottom:28px;">
+  <div class="card-title" style="font-size:1.1rem;">이 프로젝트가 하는 일</div>
+  <p style="margin:8px 0; font-size:0.9rem;">
+    한국전력공사의 <strong>3,500호 고객</strong>(일반용 3,000호 + 주택용 500호)에 대해,
+    매월 검침일로부터 <strong>+10일, +20일 시점에 해당 월의 전력사용량을 예측</strong>합니다.
+    예측 결과가 아래 3가지 조건 중 하나라도 만족하면 <strong>"전기요금 과다발생" 알림</strong>을 보냅니다:
+  </p>
+  <ul style="margin:8px 0 12px;">
+    <li>전월 대비 <strong>+30%</strong> 초과</li>
+    <li>전년 동월 대비 <strong>+30%</strong> 초과</li>
+    <li>직전 3개월 평균 대비 <strong>+50%</strong> 초과</li>
+  </ul>
+  <p style="font-size:0.9rem;">
+    고객에게 미리 알려주어 <strong>합리적인 전력 소비를 유도</strong>하는 것이 과제의 최종 목표입니다.
+  </p>
+</div>
+
+<div class="card" style="border-left:4px solid #e17055; margin-bottom:28px;">
+  <div class="card-title" style="font-size:1.1rem;">평가 기준 (심사위원이 보는 것)</div>
+  <ol style="margin:8px 0; font-size:0.9rem; padding-left:20px;">
+    <li><strong>예측 정확도</strong> — 예측 사용량 vs 실제 사용량의 차이 (MAPE, NRMSE 등)</li>
+    <li><strong>스케일 아웃</strong> — 3,500호가 아닌 수만~수십만 호로 확장 가능한 코드 설계인가</li>
+  </ol>
+</div>
+
+<div class="card" style="border-left:4px solid #00b894; margin-bottom:28px;">
+  <div class="card-title" style="font-size:1.1rem;">데이터와 작업 환경의 제약</div>
+  <ul style="margin:8px 0; font-size:0.9rem;">
+    <li><strong>원본 LP 데이터</strong>(15분 단위 전력사용 기록)는 <strong>한전 데이터안심구역</strong>에서만 접근 가능 — 서울 서초구 한전아트센터 4층에 직접 방문해야 함</li>
+    <li>안심구역에서 <strong>코드와 분석 결과만 반출</strong> 가능, 원본 데이터 반출 불가</li>
+    <li>외부 데이터(기상 등)는 <strong>USB로 반입</strong> 가능 (사전 신고 필요)</li>
+    <li>따라서 이 코드베이스를 <strong>완성된 상태로 가져가서</strong>, 현장에서 데이터만 연결하면 바로 돌아가야 함</li>
+  </ul>
+</div>
+
+<div class="card" style="border-left:4px solid #6c5ce7; margin-bottom:28px;">
+  <div class="card-title" style="font-size:1.1rem;">예측 방식 요약</div>
+  <p style="margin:8px 0; font-size:0.9rem;">
+    15분 단위 AMI 데이터를 <strong>직접 시간별로 예측하지 않고</strong>, 월초 관측 데이터에서 패턴 피처를 추출한 뒤
+    <strong>월 전체 사용량(kWh)을 한 번에 예측</strong>합니다. 핵심 근거: 월초 10일 누적 사용량과 월 전체 사용량의 상관이 0.976으로 매우 높아,
+    "관측된 페이스"가 가장 강력한 예측 변수입니다. 여기에 기상(HDD/CDD), 특수일, 역률, 고객 이력 등 외생변수를 추가하여 LightGBM으로 학습합니다.
+  </p>
+</div>
+
 <div class="stats">
   <div class="stat-box"><div class="stat-num">19</div><div class="stat-label">프로파일러 통계</div></div>
   <div class="stat-box"><div class="stat-num">32+</div><div class="stat-label">모델 피처</div></div>
@@ -55,6 +100,8 @@
 
 <!-- ===== 분석 구조 ===== -->
 <h2>분석 구조 — 전체 자동 (python run.py → 1번)</h2>
+
+<p style="margin-bottom:12px; font-size:0.9rem;">안심구역에서 <code>python run.py</code>를 실행하고 <strong>1번을 누르면 아래 전 과정이 자동</strong>으로 진행됩니다. 기본값으로 먼저 돌린 뒤(Phase 1), 어떤 설정이 가장 좋은지 자동 비교(Phase 2~3)하고, 최적 설정으로 다시 학습(Phase 3), 마지막으로 하이퍼파라미터를 미세 조정(Phase 4)합니다. 중간에 중단해도 <code>--resume</code>으로 이어서 실행됩니다.</p>
 
 <div class="highlight">1번 선택 시 Step 1~12 전부 자동 실행. 중단 시 <code>--resume</code>으로 이어서. Ablation + 피처 자동 선정 + 튜닝까지 포함.</div>
 
@@ -72,6 +119,7 @@
 
 <!-- ===== 전체 Step ===== -->
 <h2>전체 파이프라인 12 Step</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">각 Step이 하는 일과 <strong>왜 필요한지</strong>:</p>
 
 <table>
   <tr><th>Step</th><th>모듈</th><th>내용</th><th>산출물</th></tr>
@@ -96,6 +144,11 @@
 
 <!-- ===== Sliding 평가 ===== -->
 <h2>Sliding 상세 평가 (Step 5.5, 기본 포함)</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  과제가 "+10일, +20일 예측"을 요구하는데, <strong>검침일이 고객마다 다를 수 있어요</strong> (1일, 5일, 15일 등).
+  그래서 모델을 1번 학습한 뒤, <strong>검침일을 바꿔가며 예측</strong>하여 "어떤 검침일에서든 잘 동작하는지" 확인합니다.
+  오차를 월별·계약종별·특수일별 등 여러 각도로 분석하여 <strong>모델이 어디서 약한지</strong> 파악합니다.
+</p>
 
 <div class="card">
   <div class="card-title">학습 1번 → 예측만 검침일별 반복</div>
@@ -132,6 +185,12 @@
 
 <!-- ===== Ablation ===== -->
 <h2>Ablation Study (Step 10)</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  모델 성능에 영향을 주는 설정(BTM 처리 방식, 기상 가중치, 기준온도, 피처 구성)이 여러 가지인데,
+  <strong>전수 조합을 돌리면 시간이 터집니다</strong> (36+가지).
+  대신 기본값에서 <strong>하나씩만 바꿔서 영향도를 측정</strong>(Ablation)한 뒤, 각 요소의 최적값을 조합합니다.
+  추가로 <strong>피처 그룹별 기여도</strong>(AMI·기상·래그 등)도 측정하여 "AMI 데이터가 예측에 얼마나 기여하는가"를 정량화합니다.
+</p>
 
 <div class="grid2">
   <div class="card">
@@ -165,6 +224,12 @@
 
 <!-- ===== 피처 선택 ===== -->
 <h2>피처 자동 선정 <code>src/feature_selection.py</code></h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  32개 피처를 전부 넣으면 <strong>비슷한 정보를 담은 피처끼리 충돌</strong>(다중공선성)이 생기고
+  노이즈 피처가 모델을 방해할 수 있어요. 자동 선정은 <strong>목표변수(월 kWh)와 상관이 높으면서
+  서로 겹치지 않는 피처만</strong> 골라줍니다. 상관 0.01 미만은 처음부터 컷, 피처 간 상관 0.85 이상은
+  약한 쪽 제거, VIF 10 이상은 순차 제거합니다.
+</p>
 
 <div class="flow-box">32개 후보
     │
@@ -178,6 +243,12 @@
 
 <!-- ===== 전처리 ===== -->
 <h2>전처리 <code>src/preprocess.py</code></h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  실 LP 데이터에는 <strong>결측(센서 장애), 중복(재전송), 이상값(계량 오류)</strong>이 있을 수 있어요.
+  이걸 그대로 모델에 넣으면 프로파일러 통계가 왜곡되고 예측 정확도가 떨어집니다.
+  전처리는 <strong>원본을 건드리지 않고</strong> 복사본에서 처리하며, 모든 단계를 로그로 기록하여
+  "어떤 전처리를 했는지" 보고서에 투명하게 제시합니다.
+</p>
 <table>
   <tr><th>단계</th><th>처리</th><th>방법</th><th>기본값</th></tr>
   <tr><td>1</td><td>중복 제거</td><td>고객×시간 중복 → 마지막 유지</td><td>항상</td></tr>
@@ -189,6 +260,12 @@
 
 <!-- ===== 프로파일러 ===== -->
 <h2>프로파일러 <code>src/profiler.py</code> — 19개 통계</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  안심구역에서 원본 데이터를 반출할 수 없으므로, <strong>집계 통계만 산출하여 반출</strong>합니다.
+  이 통계가 보고서의 "데이터 특성 분석(EDA)" 섹션의 근거가 되고,
+  모델 설계 방향(왜 이 피처를 선택했는가)을 정당화하는 데 쓰입니다.
+  모든 통계는 <strong>개인정보 재식별 불가</strong> — 최소 표본 10건 이상, 수치 6자리 라운딩, customer_id 미포함.
+</p>
 <table>
   <tr><th>#</th><th>통계</th><th>파일</th><th>내용</th></tr>
   <tr><td>00</td><td>스키마</td><td>00_schema.json</td><td>컬럼명, 타입, 결측률</td></tr>
@@ -213,6 +290,10 @@
 
 <!-- ===== 피처 ===== -->
 <h2>피처 엔지니어링 — 32개</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  LightGBM 모델에 들어가는 입력 변수들입니다. 15분 단위 AMI 데이터에서 <strong>월별 검침으로는 알 수 없는 패턴</strong>(피크 비율, 역률, 주말/평일 차이 등)을
+  추출하여 "AMI 데이터의 실질적 가치"를 입증합니다. 기상 변수는 raw 기온이 아닌 <strong>HDD/CDD로 분리</strong>하여 여름(냉방)과 겨울(난방)의 상관이 상쇄되는 문제를 방지합니다.
+</p>
 <div class="grid2">
   <div class="card">
     <div class="card-title">관측 기본 <span class="badge b-green">2</span></div>
@@ -258,6 +339,12 @@
 
 <!-- ===== 기상 ===== -->
 <h2>기상 데이터 — ASOS 8대 도시 (2020~2026, 7년)</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  전력 수요는 기온(냉난방)에 크게 영향받습니다. 3,500호의 지역이 어디인지 모를 수 있어서,
+  <strong>전력거래소 논문 기반으로 8대 도시 기온을 가중평균</strong>하여 전국 대표 기상 데이터를 만듭니다.
+  가중치는 전력판매량·인구 기반이며, 안심구역에서 실 LP와의 상관으로 <strong>최적 가중치를 역산</strong>할 수도 있습니다.
+  CDH(Cooling Degree Hours)는 일평균 CDD보다 정확 — 시간별로 산출하여 낮/저녁/야간을 분리합니다.
+</p>
 <table>
   <tr><th>관측소</th><th>도시</th><th>맵핑</th><th>가중치 (논문 표6)</th></tr>
   <tr><td>108</td><td>서울</td><td>서울+경기북부</td><td>43.76%</td></tr>
@@ -282,6 +369,12 @@
 
 <!-- ===== 요금 ===== -->
 <h2>요금 환산 <code>src/tariff.py</code> — 2026.04.16 시행</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  과제명이 "전기<strong>요금</strong> 과다발생"인데, 사용량(kWh) 예측만으로는 부족할 수 있어요.
+  주택용은 <strong>누진제</strong>(사용량 +30% → 요금 +41%), 일반용은 <strong>TOU 시간대별 단가</strong>가 적용되어
+  같은 kWh라도 요금이 다릅니다. 예측 kWh를 요금(원)으로 환산하여 <strong>요금 기준 알림</strong>도 제공합니다.
+  모든 단가는 2026년 4월 16일 시행 전기요금표(PDF) 원본에서 직접 추출한 값입니다.
+</p>
 <div class="grid2">
   <div class="card">
     <div class="card-title">주택용 누진제</div>
@@ -307,6 +400,12 @@
 
 <!-- ===== BTM ===== -->
 <h2>BTM 처리 — 3단계</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  BTM(Behind-The-Meter)은 고객 계량기 뒤에 <strong>태양광 등 자가발전 설비</strong>가 있는 경우를 말합니다.
+  이런 고객은 계량 사용량 ≠ 실제 소비여서 예측 모델이 혼란을 겪어요.
+  BTM 고객을 <strong>제외하지 않고 btm_score(0~1)를 피처로 투입</strong>하여 모델이 자체적으로 차별화된 패턴을 학습하게 합니다.
+  스케일 아웃 시 BTM 비율이 증가하면 자가발전량 예측 보조 모델(Stage 2)로 확장 가능합니다.
+</p>
 <table>
   <tr><th>단계</th><th>내용</th><th>상태</th></tr>
   <tr><td>1</td><td>탐지 (음수/골짜기/급변/역전)</td><td>구현 완료</td></tr>
@@ -316,6 +415,12 @@
 
 <!-- ===== 역률 전략 ===== -->
 <h2>역률·TOU 추정 전략 — 5가지</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  요금 환산에 역률(power factor)과 TOU 시간대 비율이 필요한데, 이 값은 <strong>월 전체가 끝나야 확정</strong>됩니다.
+  +10일 시점에서는 관측된 10일 데이터로 월 전체를 추정해야 해요.
+  "관측값을 그대로 연장해도 되는가?"를 프로파일러 #18(부분월 안정성)에서 실증 검증하고,
+  상관이 낮으면 전월값이나 계절 평균 등 <strong>대안 전략으로 자동 전환</strong>합니다.
+</p>
 <table>
   <tr><th>전략</th><th>방법</th><th>적용 조건 (부분월 안정성 상관 기준)</th></tr>
   <tr><td>observed</td><td>관측 N일 값 연장</td><td>상관 0.95+</td></tr>
@@ -327,6 +432,11 @@
 
 <!-- ===== 스케일 ===== -->
 <h2>스케일 아웃</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  과제 평가 기준 중 하나가 <strong>"수만~수십만 호로 확장 가능한 코드 설계"</strong>입니다.
+  현재 3,500호에서는 pandas 단일 프로세스로 충분하지만, 한전 실제 고객 2,200만 호를 고려한 설계를 제시합니다.
+  고객을 청크로 나눠 병렬 처리 가능하게 하고, 학습과 추론을 분리하여 운영 환경에서 배치 실행이 가능한 구조입니다.
+</p>
 <table>
   <tr><th>요소</th><th>설계</th></tr>
   <tr><td>모델</td><td>글로벌 1개 — 고객 수 무관</td></tr>
@@ -337,6 +447,10 @@
 
 <!-- ===== 안전 ===== -->
 <h2>안전 장치</h2>
+<p style="margin-bottom:12px; font-size:0.9rem;">
+  안심구역 방문 시간이 제한적이고, 데이터 형태를 사전에 알 수 없으며, 중간에 중단될 수도 있어요.
+  이런 <strong>현장 리스크에 대비</strong>한 안전 장치들입니다.
+</p>
 <div class="grid2">
   <div class="card">
     <div class="card-title">체크포인트</div>
