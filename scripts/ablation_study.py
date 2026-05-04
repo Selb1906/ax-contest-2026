@@ -122,8 +122,10 @@ def run_single_experiment(df, config, train_end):
     # 피처 선택
     if config.feature_selection:
         from src.feature_selection import auto_select_features
+        # 누수 방지: train+val에서만 피처 선택 (test 미포함)
+        trainval = features[features["year_month"] <= train_end]
         result = auto_select_features(
-            features, spec.numeric, "full_month_kwh",
+            trainval, spec.numeric, "full_month_kwh",
             corr_threshold=config.corr_threshold,
             vif_threshold=config.vif_threshold,
         )

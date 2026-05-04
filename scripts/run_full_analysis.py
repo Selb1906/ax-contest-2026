@@ -315,9 +315,12 @@ def main() -> int:
                 if "contract_type" not in monthly_with_ct.columns:
                     cust_ct = df[["customer_id", "contract_type"]].drop_duplicates()
                     monthly_with_ct = monthly_with_ct.merge(cust_ct, on="customer_id", how="left")
-                prog.update(label="최적화 실행 중...")
+                # 누수 방지: test 기간 제외
+                test_cutoff = val_end_p if val_end_p else train_end_p
+                monthly_trainval = monthly_with_ct[monthly_with_ct["year_month"] <= test_cutoff]
+                prog.update(label=f"최적화 실행 중 (test 제외, ~{test_cutoff})...")
                 opt_results = run_weather_optimization(
-                    asos_df, monthly_with_ct, station_feats, out_dir="weather_opt"
+                    asos_df, monthly_trainval, station_feats, out_dir="weather_opt"
                 )
                 ckpt.save_intermediate("weather_opt", opt_results)
             else:
@@ -393,9 +396,11 @@ def main() -> int:
             # 피처 선택이 최적이면 auto_select 적용
             if optimal_config.get("feature_selection", False):
                 from src.feature_selection import auto_select_features, print_selection_report
-                prog.update(label="피처 자동 선정 중...")
+                prog.update(label="피처 자동 선정 중 (train+val만, 누수 방지)...")
+                # 누수 방지: test 제외
+                trainval_features = features[features["year_month"] <= (val_end_p if val_end_p else train_end_p)]
                 sel_result = auto_select_features(
-                    features, spec.numeric, "full_month_kwh",
+                    trainval_features, spec.numeric, "full_month_kwh",
                     corr_threshold=0.85, vif_threshold=10.0,
                 )
                 print_selection_report(sel_result)
