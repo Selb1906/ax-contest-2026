@@ -166,6 +166,15 @@ def main():
 
     source = ask("데이터 소스 선택:", config_names, config_names[0])
     train_end = ask("학습 종료 기간 (예: 2023-12):", default="2023-12")
+    meter_days_str = ask("검침일 (쉼표 구분, 예: 1,15 또는 all=1~28):", default="all")
+    if meter_days_str.strip().lower() == "all":
+        meter_days_arg = ",".join(str(i) for i in range(1, 29))
+    else:
+        meter_days_arg = meter_days_str
+
+    print(f"\n  소스: {source}")
+    print(f"  학습 종료: {train_end}")
+    print(f"  검침일: {meter_days_arg}")
 
     # 팀 모드
     n_members = int(ask("작업 인원 (1~4):", default="1"))
@@ -222,7 +231,7 @@ def main():
             resume = ask("이전 체크포인트에서 이어서?", ["새로 실행", "이어서 실행"], "새로 실행")
             skip_profile = ask("프로파일러 스킵?", ["아니오", "예"], "아니오")
             skip_shap = ask("SHAP 분석 스킵?", ["아니오", "예"], "아니오")
-            cmd = f'python -m scripts.run_full_analysis --source {source} --train-end {train_end}'
+            cmd = f'python -m scripts.run_full_analysis --source {source} --train-end {train_end} --meter-days {meter_days_arg}'
             if resume == "이어서 실행":
                 cmd += " --resume"
             if skip_profile == "예":

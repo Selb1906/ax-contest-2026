@@ -39,10 +39,18 @@ def main() -> int:
     parser.add_argument("--skip-shap", action="store_true")
     parser.add_argument("--resume", action="store_true", help="체크포인트에서 이어서 실행")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--meter-days", default=None,
+                        help="검침일 목록 (쉼표 구분, 예: 1,15). 미지정 시 1~28 전수")
     args = parser.parse_args()
 
     ckpt = CheckpointManager(args.checkpoint_dir)
     skip_done = args.resume
+
+    # 검침일 파싱
+    if args.meter_days:
+        METER_DAYS = [int(x) for x in args.meter_days.split(",")]
+    else:
+        METER_DAYS = list(range(1, 29))
 
     print("""
 ╔══════════════════════════════════════════════════════╗
@@ -50,6 +58,7 @@ def main() -> int:
 ╚══════════════════════════════════════════════════════╝""")
     print(f"  소스: {args.source}")
     print(f"  학습 종료: {args.train_end}")
+    print(f"  검침일: {METER_DAYS}")
     print(f"  체크포인트: {args.checkpoint_dir}/ {'(이어서 실행)' if skip_done else '(새로 실행)'}")
 
     # ────────────────────────────────────────────
@@ -388,7 +397,7 @@ def main() -> int:
                     test_opt[c] = test_opt[c].astype("category")
 
             opt_sliding = []
-            for md in range(1, 29):
+            for md in METER_DAYS:
                 try:
                     h_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
                     ctx_md = ev.attach_alarm_context(h_md, monthly)
@@ -455,7 +464,7 @@ def main() -> int:
                         test_tuned[c] = test_tuned[c].astype("category")
 
                 tuned_sliding = []
-                for md in range(1, 29):
+                for md in METER_DAYS:
                     try:
                         h_md = ev.build_horizon_table(daily, horizons=(10, 20), meter_day=md)
                         ctx_md = ev.attach_alarm_context(h_md, monthly)
