@@ -129,21 +129,51 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
             results = []
             for cid in midday[CUSTOMER_ID].unique():
                 cust = midday[midday[CUSTOMER_ID] == cid]
-                sunny = cust[cust["solar_rank"] >= 0.7][P_ACTIVE_KWH]
-                cloudy = cust[cust["solar_rank"] <= 0.3][P_ACTIVE_KWH]
+                sunny = cust[cust["solar_rank"] >= 0.7]
+                cloudy = cust[cust["solar_rank"] <= 0.3]
 
                 if len(sunny) < 10 or len(cloudy) < 10:
-                    results.append({CUSTOMER_ID: cid, "solar_load_ratio": 1.0, "solar_load_corr": 0.0})
+                    results.append({
+                        CUSTOMER_ID: cid, "solar_load_ratio": 1.0,
+                        "solar_load_corr": 0.0, "est_capacity_kw": 0.0,
+                    })
                     continue
 
-                ratio = sunny.mean() / cloudy.mean() if cloudy.mean() > 0 else 1.0
+                sunny_load = sunny[P_ACTIVE_KWH].mean()
+                cloudy_load = cloudy[P_ACTIVE_KWH].mean()
+                ratio = sunny_load / cloudy_load if cloudy_load > 0 else 1.0
+
                 corr = cust["solar_mj"].corr(cust[P_ACTIVE_KWH])
                 corr = corr if np.isfinite(corr) else 0.0
+
+                # 용량 추산: 일사량과 사용량 감소분의 회귀
+                # 발전 차감분 = cloudy_load - actual_load (일사 높을수록 차감 큼)
+                # 회귀: 차감분 = β × solar_mj → β ≈ 패널 효율 × 면적 (kW 비례)
+                est_kw = 0.0
+                if ratio < 1.0:  # 맑은 날에 사용량 감소한 경우만
+                    try:
+                        solar_vals = cust["solar_mj"].values
+                        load_vals = cust[P_ACTIVE_KWH].values
+                        # 일사=0인 시간의 평균 부하를 기저로
+                        baseline = cust[cust["solar_mj"] <= 0.01][P_ACTIVE_KWH].mean()
+                        if np.isfinite(baseline) and baseline > 0:
+                            curtailment = baseline - load_vals  # 양수면 차감된 양
+                            valid = solar_vals > 0.1
+                            if valid.sum() >= 10:
+                                # 단순 회귀: curtailment = β × solar
+                                from numpy.linalg import lstsq
+                                X = solar_vals[valid].reshape(-1, 1)
+                                y = curtailment[valid]
+                                beta, *_ = lstsq(X, y, rcond=None)
+                                est_kw = max(float(beta[0]) * 4, 0)  # 15분→시간 환산, 음수 방지
+                    except Exception:
+                        pass
 
                 results.append({
                     CUSTOMER_ID: cid,
                     "solar_load_ratio": float(ratio),
                     "solar_load_corr": float(corr),
+                    "est_capacity_kw": float(est_kw),
                 })
 
             if results:
@@ -158,7 +188,7 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
 
                 out["daytime_valley"] = ((ratios < r_th) & (corrs < c_th)).astype(int)
                 out["midday_ratio"] = out["solar_load_ratio"]
-                return out[["midday_ratio", "daytime_valley"]]
+                return out[["midday_ratio", "daytime_valley", "est_capacity_kw"]]
 
     # fallback: ASOS 없으면 비율 분포 이상치
     midday_f = d[d["hour"].between(10, 15)]
@@ -171,7 +201,8 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
     r_std = merged["midday_ratio"].std()
     threshold = r_mean - 2 * r_std if r_std > 0 else 0
     merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
-    return merged[["midday_ratio", "daytime_valley"]]
+    merged["est_capacity_kw"] = 0.0
+    return merged[["midday_ratio", "daytime_valley", "est_capacity_kw"]]
 
 
 # ── 신호 3: 수준 급변 (월 사용량 30%+ 하락 감지) ──
@@ -268,7 +299,10 @@ def detect(
 
     flags = cust_base.copy()
     flags = flags.join(s1[["neg_count", "neg_rate"]], how="left")
-    flags = flags.join(s2[["midday_ratio", "daytime_valley"]], how="left")
+    s2_cols = ["midday_ratio", "daytime_valley"]
+    if "est_capacity_kw" in s2.columns:
+        s2_cols.append("est_capacity_kw")
+    flags = flags.join(s2[s2_cols], how="left")
     flags = flags.join(s3[["max_drop_pct", "level_shift"]], how="left")
     flags = flags.join(s4[["summer_ratio", "summer_inverted"]], how="left")
     flags = flags.fillna(0)
