@@ -58,39 +58,91 @@ def _signal_negative(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
-    """낮 시간 골짜기 — 계약종별 임계값 분리.
+    """낮 시간 BTM 탐지 — 맑은 날 vs 흐린 날 비교.
 
-    주택용: 낮에 외출로 사용량 감소가 정상 (0.5~0.7도 일반적)
-      → 임계값 0.3 (극단적으로 낮을 때만 BTM 의심)
-    일반용: 주간 영업이 정상 → 낮이 오히려 높아야 함
-      → 임계값 0.7 (낮이 일평균보다 낮으면 BTM 의심)
+    핵심 논리:
+      같은 고객, 같은 시간대(12~15시), 비슷한 외기온에서
+      맑은 날(일사 높음)과 흐린 날(일사 낮음)의 사용량 차이를 비교.
+
+      BTM 있음: 맑은 날에 발전량 많아 계량값 급감 → 차이 큼
+      BTM 없음: 일사와 무관하게 사용량 유사 → 차이 작음
+
+    기상 데이터(일사량)가 LP에 없으면 fallback으로 단순 비율 사용.
     """
-    from .schemas import CONTRACT_TYPE
-
+    t = pd.to_datetime(df[TS])
     d = df[[CUSTOMER_ID, TS, P_ACTIVE_KWH]].copy()
-    if CONTRACT_TYPE in df.columns:
-        d[CONTRACT_TYPE] = df[CONTRACT_TYPE].values
-    d["hour"] = pd.to_datetime(d[TS]).dt.hour
+    d["hour"] = t.dt.hour
+    d["date"] = t.dt.normalize()
 
-    midday = d[d["hour"].between(12, 15)]
-    midday_avg = midday.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
-    daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
+    # 기상 sidecar 컬럼 확인 (일사량)
+    has_solar = "_solar" in " ".join(df.columns) or "solar_mj" in df.columns or "ghi" in " ".join(df.columns)
+    solar_col = None
+    for col in ["solar_mj", "_solar", "ghi_whm2"]:
+        if col in df.columns:
+            solar_col = col
+            d[solar_col] = df[col].values
+            break
 
-    # 고객별 계약종별
-    cust_ct = d.groupby(CUSTOMER_ID, observed=True)[CONTRACT_TYPE].first() if CONTRACT_TYPE in d.columns else None
+    midday = d[d["hour"].between(10, 15)].copy()
 
-    merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
-    merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
+    if solar_col and midday[solar_col].notna().sum() > 100:
+        # 일사량 기반: 맑은 날 vs 흐린 날 비교
+        daily_solar = midday.groupby([CUSTOMER_ID, "date"]).agg(
+            load=(P_ACTIVE_KWH, "mean"),
+            solar=(solar_col, "mean"),
+        ).reset_index()
 
-    # 계약종별 임계값 분리
-    if cust_ct is not None:
-        merged = merged.join(cust_ct)
-        threshold = merged[CONTRACT_TYPE].map({"주택용": 0.3, "일반용": 0.7}).fillna(0.5)
+        results = []
+        for cid, grp in daily_solar.groupby(CUSTOMER_ID, observed=True):
+            if len(grp) < 20:
+                results.append({CUSTOMER_ID: cid, "solar_load_corr": 0.0, "daytime_valley": 0})
+                continue
+
+            # 일사 상위 30% (맑은 날) vs 하위 30% (흐린 날)
+            q70 = grp["solar"].quantile(0.7)
+            q30 = grp["solar"].quantile(0.3)
+            sunny = grp[grp["solar"] >= q70]["load"]
+            cloudy = grp[grp["solar"] <= q30]["load"]
+
+            if len(sunny) < 5 or len(cloudy) < 5:
+                results.append({CUSTOMER_ID: cid, "solar_load_corr": 0.0, "daytime_valley": 0})
+                continue
+
+            # BTM 있으면: 맑은 날 사용량 << 흐린 날 (발전 차감)
+            # BTM 없으면: 맑은 날 ≥ 흐린 날 (냉방으로 오히려 증가)
+            sunny_mean = sunny.mean()
+            cloudy_mean = cloudy.mean()
+            ratio = sunny_mean / cloudy_mean if cloudy_mean > 0 else 1.0
+
+            # 일사-부하 상관: BTM이면 음의 상관 (일사 높을수록 부하 감소)
+            corr = grp["solar"].corr(grp["load"])
+            corr = corr if np.isfinite(corr) else 0.0
+
+            # BTM 판정: 맑은 날이 흐린 날보다 20%+ 적고, 음의 상관
+            is_btm = int(ratio < 0.8 and corr < -0.2)
+
+            results.append({
+                CUSTOMER_ID: cid,
+                "sunny_cloudy_ratio": float(ratio),
+                "solar_load_corr": float(corr),
+                "daytime_valley": is_btm,
+            })
+
+        out = pd.DataFrame(results).set_index(CUSTOMER_ID)
+        if "sunny_cloudy_ratio" not in out.columns:
+            out["sunny_cloudy_ratio"] = 0.0
+        out["midday_ratio"] = out.get("sunny_cloudy_ratio", 0.0)
+        return out[["midday_ratio", "daytime_valley"]]
+
     else:
-        threshold = 0.5
-
-    merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
-    return merged[["midday_ratio", "daytime_valley"]]
+        # fallback: 일사 데이터 없으면 단순 비율 (보수적 임계값)
+        midday_avg = midday.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
+        daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
+        merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
+        merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
+        # 보수적 임계값 — 일사 비교 없이는 오탐 위험이 크므로 0.3으로
+        merged["daytime_valley"] = (merged["midday_ratio"] < 0.3).astype(int)
+        return merged[["midday_ratio", "daytime_valley"]]
 
 
 # ── 신호 3: 수준 급변 (월 사용량 30%+ 하락 감지) ──
