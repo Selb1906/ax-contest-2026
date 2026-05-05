@@ -58,17 +58,38 @@ def _signal_negative(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
+    """낮 시간 골짜기 — 계약종별 임계값 분리.
+
+    주택용: 낮에 외출로 사용량 감소가 정상 (0.5~0.7도 일반적)
+      → 임계값 0.3 (극단적으로 낮을 때만 BTM 의심)
+    일반용: 주간 영업이 정상 → 낮이 오히려 높아야 함
+      → 임계값 0.7 (낮이 일평균보다 낮으면 BTM 의심)
+    """
+    from .schemas import CONTRACT_TYPE
+
     d = df[[CUSTOMER_ID, TS, P_ACTIVE_KWH]].copy()
+    if CONTRACT_TYPE in df.columns:
+        d[CONTRACT_TYPE] = df[CONTRACT_TYPE].values
     d["hour"] = pd.to_datetime(d[TS]).dt.hour
 
     midday = d[d["hour"].between(12, 15)]
     midday_avg = midday.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
     daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
 
+    # 고객별 계약종별
+    cust_ct = d.groupby(CUSTOMER_ID, observed=True)[CONTRACT_TYPE].first() if CONTRACT_TYPE in d.columns else None
+
     merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
     merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
-    # 비율 < 0.7 이면 낮 시간에 비정상적으로 낮음 (태양광 자가소비 차감)
-    merged["daytime_valley"] = (merged["midday_ratio"] < 0.7).astype(int)
+
+    # 계약종별 임계값 분리
+    if cust_ct is not None:
+        merged = merged.join(cust_ct)
+        threshold = merged[CONTRACT_TYPE].map({"주택용": 0.3, "일반용": 0.7}).fillna(0.5)
+    else:
+        threshold = 0.5
+
+    merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
     return merged[["midday_ratio", "daytime_valley"]]
 
 
