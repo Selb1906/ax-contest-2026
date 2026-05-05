@@ -260,8 +260,11 @@ def _signal_summer_inversion(df: pd.DataFrame) -> pd.DataFrame:
 
     merged = pd.concat([summer_avg, shoulder_avg], axis=1).dropna()
     merged["summer_ratio"] = merged["summer_avg"] / merged["shoulder_avg"].clip(lower=1e-9)
-    # 여름이 봄가을보다 오히려 낮으면 태양광 의심
-    merged["summer_inverted"] = (merged["summer_ratio"] < 0.85).astype(int)
+    # 전체 분포 기반 이상치 (고정 임계값 없음)
+    r_mean = merged["summer_ratio"].mean()
+    r_std = merged["summer_ratio"].std()
+    threshold = r_mean - 2 * r_std if r_std > 0 else 0
+    merged["summer_inverted"] = (merged["summer_ratio"] < threshold).astype(int)
     return merged[["summer_ratio", "summer_inverted"]]
 
 
