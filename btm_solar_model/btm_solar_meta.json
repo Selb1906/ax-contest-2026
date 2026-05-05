@@ -22,7 +22,7 @@
   ],
   "target": "btm_mwh",
   "train_end": "2024-12",
-  "test_mape": 13.91,
-  "test_rmse": 98281.0,
-  "best_iteration": 295
+  "test_mape": 13.68,
+  "test_rmse": 396249.0,
+  "best_iteration": 300
 }

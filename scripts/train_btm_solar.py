@@ -34,13 +34,17 @@ def load_btm_data() -> pd.DataFrame:
         df["datetime"] = df["datetime"] - pd.Timedelta(hours=1)
     df["year_month"] = df["datetime"].dt.to_period("M")
 
+    # BTM = total - market = kepco_ppa + self_use
+    df["btm_solar_mw"] = df["total_solar_mw"] - df["market_solar_mw"]
+
     # 월별 집계: MWh (시간별 MW → 합산 = MWh)
     monthly = df.groupby("year_month").agg(
-        btm_mwh=("self_use_solar_mw", "sum"),
-        btm_peak_mw=("self_use_solar_mw", "max"),
-        btm_mean_mw=("self_use_solar_mw", "mean"),
+        btm_mwh=("btm_solar_mw", "sum"),
+        btm_peak_mw=("btm_solar_mw", "max"),
+        btm_mean_mw=("btm_solar_mw", "mean"),
         total_solar_mwh=("total_solar_mw", "sum"),
-        n_hours=("self_use_solar_mw", "count"),
+        market_mwh=("market_solar_mw", "sum"),
+        n_hours=("btm_solar_mw", "count"),
     ).reset_index()
 
     # BTM 비율
@@ -96,7 +100,7 @@ def main() -> int:
     target_col = "btm_mwh"
     feature_cols = [c for c in features.columns
                     if c not in ("year_month", target_col, "btm_peak_mw", "btm_mean_mw",
-                                 "total_solar_mwh", "n_hours", "btm_ratio")]
+                                 "total_solar_mwh", "market_mwh", "n_hours", "btm_ratio")]
 
     # 2026-01은 0값이므로 제외, 마지막 완전 연도를 test로
     features = features[features[target_col] > 0]
