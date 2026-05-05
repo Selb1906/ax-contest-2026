@@ -57,108 +57,113 @@ def _signal_negative(df: pd.DataFrame) -> pd.DataFrame:
 # ── 신호 2: 낮 시간 골짜기 (12~15시 vs 일평균) ──
 
 
+def _load_btm_hourly(btm_csv_path: str = "kpx_BTM.csv") -> pd.Series | None:
+    """KPX BTM 시간별 데이터 로드 → 시간별 BTM 발전 강도."""
+    from pathlib import Path
+    p = Path(btm_csv_path)
+    if not p.exists():
+        return None
+    btm = pd.read_csv(p)
+    btm["datetime"] = pd.to_datetime(btm["datetime"])
+    # 01~24시 보정
+    if btm["datetime"].dt.hour.min() >= 1:
+        btm["datetime"] = btm["datetime"] - pd.Timedelta(hours=1)
+    btm["btm_mw"] = btm["total_solar_mw"] - btm["market_solar_mw"]
+    return btm.set_index("datetime")["btm_mw"]
+
+
 def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
-    """낮 시간 BTM 탐지 — 맑은 날 vs 흐린 날 비교.
+    """BTM 발전 강도 기반 탐지 — KPX BTM csv 활용.
 
     핵심 논리:
-      같은 고객, 같은 시간대(12~15시), 비슷한 외기온에서
-      맑은 날(일사 높음)과 흐린 날(일사 낮음)의 사용량 차이를 비교.
+      KPX BTM 데이터에서 "BTM 발전이 많은 시간"과 "적은 시간"을 구분.
+      같은 고객이 BTM 발전 많은 시간에 유독 사용량이 낮으면 → BTM 의심.
 
-      BTM 있음: 맑은 날에 발전량 많아 계량값 급감 → 차이 큼
-      BTM 없음: 일사와 무관하게 사용량 유사 → 차이 작음
+      BTM 있는 고객: 발전 많은 시간에 계량값 급감 → high/low ratio 낮음
+      BTM 없는 고객: BTM 발전량과 무관 → high/low ratio ≈ 1.0
 
-    기상 데이터(일사량)가 LP에 없으면 fallback으로 단순 비율 사용.
+    BTM csv 없으면 fallback으로 분포 기반 이상치 탐지.
     """
     t = pd.to_datetime(df[TS])
     d = df[[CUSTOMER_ID, TS, P_ACTIVE_KWH]].copy()
     d["hour"] = t.dt.hour
+    d["datetime_h"] = t.dt.floor("h")
     d["date"] = t.dt.normalize()
 
-    # 기상 sidecar 컬럼 확인 (일사량)
-    has_solar = "_solar" in " ".join(df.columns) or "solar_mj" in df.columns or "ghi" in " ".join(df.columns)
-    solar_col = None
-    for col in ["solar_mj", "_solar", "ghi_whm2"]:
-        if col in df.columns:
-            solar_col = col
-            d[solar_col] = df[col].values
-            break
+    # KPX BTM 시간별 로드
+    btm_hourly = _load_btm_hourly()
 
-    midday = d[d["hour"].between(10, 15)].copy()
+    if btm_hourly is not None and len(btm_hourly) > 100:
+        # LP의 시간별 타임스탬프에 BTM 발전 강도 조인
+        d["btm_intensity"] = d["datetime_h"].map(btm_hourly).fillna(0)
 
-    if solar_col and midday[solar_col].notna().sum() > 100:
-        # 일사량 기반: 맑은 날 vs 흐린 날 비교
-        daily_solar = midday.groupby([CUSTOMER_ID, "date"]).agg(
+        # 낮 시간(10~15시)만
+        midday = d[d["hour"].between(10, 15)].copy()
+
+        # 고객×일 단위 집계
+        daily = midday.groupby([CUSTOMER_ID, "date"], observed=True).agg(
             load=(P_ACTIVE_KWH, "mean"),
-            solar=(solar_col, "mean"),
+            btm_int=("btm_intensity", "mean"),
         ).reset_index()
 
         results = []
-        for cid, grp in daily_solar.groupby(CUSTOMER_ID, observed=True):
+        for cid, grp in daily.groupby(CUSTOMER_ID, observed=True):
             if len(grp) < 20:
-                results.append({CUSTOMER_ID: cid, "solar_load_corr": 0.0, "daytime_valley": 0})
+                results.append({CUSTOMER_ID: cid, "btm_load_ratio": 1.0, "btm_load_corr": 0.0})
                 continue
 
-            # 일사 상위 30% (맑은 날) vs 하위 30% (흐린 날)
-            q70 = grp["solar"].quantile(0.7)
-            q30 = grp["solar"].quantile(0.3)
-            sunny = grp[grp["solar"] >= q70]["load"]
-            cloudy = grp[grp["solar"] <= q30]["load"]
+            # BTM 발전 상위 30% (발전 많은 날) vs 하위 30% (적은 날)
+            q70 = grp["btm_int"].quantile(0.7)
+            q30 = grp["btm_int"].quantile(0.3)
+            high_btm = grp[grp["btm_int"] >= q70]["load"]
+            low_btm = grp[grp["btm_int"] <= q30]["load"]
 
-            if len(sunny) < 5 or len(cloudy) < 5:
-                results.append({CUSTOMER_ID: cid, "solar_load_corr": 0.0, "daytime_valley": 0})
+            if len(high_btm) < 5 or len(low_btm) < 5:
+                results.append({CUSTOMER_ID: cid, "btm_load_ratio": 1.0, "btm_load_corr": 0.0})
                 continue
 
-            # BTM 있으면: 맑은 날 사용량 << 흐린 날 (발전 차감)
-            # BTM 없으면: 맑은 날 ≥ 흐린 날 (냉방으로 오히려 증가)
-            sunny_mean = sunny.mean()
-            cloudy_mean = cloudy.mean()
-            ratio = sunny_mean / cloudy_mean if cloudy_mean > 0 else 1.0
-
-            # 일사-부하 상관: BTM이면 음의 상관 (일사 높을수록 부하 감소)
-            corr = grp["solar"].corr(grp["load"])
+            ratio = high_btm.mean() / low_btm.mean() if low_btm.mean() > 0 else 1.0
+            corr = grp["btm_int"].corr(grp["load"])
             corr = corr if np.isfinite(corr) else 0.0
 
             results.append({
                 CUSTOMER_ID: cid,
-                "sunny_cloudy_ratio": float(ratio),
-                "solar_load_corr": float(corr),
+                "btm_load_ratio": float(ratio),
+                "btm_load_corr": float(corr),
             })
 
         out = pd.DataFrame(results).set_index(CUSTOMER_ID)
-        if len(out) == 0 or "sunny_cloudy_ratio" not in out.columns:
+        if len(out) == 0:
             out["midday_ratio"] = 0.0
             out["daytime_valley"] = 0
             return out[["midday_ratio", "daytime_valley"]]
 
-        # 통계적 판정: 전체 분포에서 이상치 탐지 (고정 임계값 없음)
-        ratios = out["sunny_cloudy_ratio"]
-        corrs = out["solar_load_corr"]
-        ratio_mean = ratios.mean()
-        ratio_std = ratios.std()
-        corr_mean = corrs.mean()
-        corr_std = corrs.std()
+        # 통계적 판정: 전체 분포에서 이상치 (2σ)
+        ratios = out["btm_load_ratio"]
+        corrs = out["btm_load_corr"]
+        r_mean, r_std = ratios.mean(), ratios.std()
+        c_mean, c_std = corrs.mean(), corrs.std()
 
-        # ratio가 평균-2σ 미만 AND 상관이 평균-2σ 미만 → BTM
-        ratio_threshold = ratio_mean - 2 * ratio_std if ratio_std > 0 else 0
-        corr_threshold = corr_mean - 2 * corr_std if corr_std > 0 else 0
+        r_threshold = r_mean - 2 * r_std if r_std > 0 else 0
+        c_threshold = c_mean - 2 * c_std if c_std > 0 else 0
 
         out["daytime_valley"] = (
-            (ratios < ratio_threshold) & (corrs < corr_threshold)
+            (ratios < r_threshold) & (corrs < c_threshold)
         ).astype(int)
-
-        out["midday_ratio"] = out["sunny_cloudy_ratio"]
+        out["midday_ratio"] = out["btm_load_ratio"]
         return out[["midday_ratio", "daytime_valley"]]
 
     else:
-        # fallback: 일사 없으면 비율의 분포에서 이상치 탐지
+        # fallback: BTM csv 없으면 비율 분포 이상치
+        midday = d[d["hour"].between(10, 15)]
         midday_avg = midday.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
         daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
         merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
         merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
 
-        ratio_mean = merged["midday_ratio"].mean()
-        ratio_std = merged["midday_ratio"].std()
-        threshold = ratio_mean - 2 * ratio_std if ratio_std > 0 else 0
+        r_mean = merged["midday_ratio"].mean()
+        r_std = merged["midday_ratio"].std()
+        threshold = r_mean - 2 * r_std if r_std > 0 else 0
         merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
         return merged[["midday_ratio", "daytime_valley"]]
 
