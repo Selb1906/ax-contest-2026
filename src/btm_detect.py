@@ -118,30 +118,48 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
             corr = grp["solar"].corr(grp["load"])
             corr = corr if np.isfinite(corr) else 0.0
 
-            # BTM 판정: 맑은 날이 흐린 날보다 20%+ 적고, 음의 상관
-            is_btm = int(ratio < 0.8 and corr < -0.2)
-
             results.append({
                 CUSTOMER_ID: cid,
                 "sunny_cloudy_ratio": float(ratio),
                 "solar_load_corr": float(corr),
-                "daytime_valley": is_btm,
             })
 
         out = pd.DataFrame(results).set_index(CUSTOMER_ID)
-        if "sunny_cloudy_ratio" not in out.columns:
-            out["sunny_cloudy_ratio"] = 0.0
-        out["midday_ratio"] = out.get("sunny_cloudy_ratio", 0.0)
+        if len(out) == 0 or "sunny_cloudy_ratio" not in out.columns:
+            out["midday_ratio"] = 0.0
+            out["daytime_valley"] = 0
+            return out[["midday_ratio", "daytime_valley"]]
+
+        # 통계적 판정: 전체 분포에서 이상치 탐지 (고정 임계값 없음)
+        ratios = out["sunny_cloudy_ratio"]
+        corrs = out["solar_load_corr"]
+        ratio_mean = ratios.mean()
+        ratio_std = ratios.std()
+        corr_mean = corrs.mean()
+        corr_std = corrs.std()
+
+        # ratio가 평균-2σ 미만 AND 상관이 평균-2σ 미만 → BTM
+        ratio_threshold = ratio_mean - 2 * ratio_std if ratio_std > 0 else 0
+        corr_threshold = corr_mean - 2 * corr_std if corr_std > 0 else 0
+
+        out["daytime_valley"] = (
+            (ratios < ratio_threshold) & (corrs < corr_threshold)
+        ).astype(int)
+
+        out["midday_ratio"] = out["sunny_cloudy_ratio"]
         return out[["midday_ratio", "daytime_valley"]]
 
     else:
-        # fallback: 일사 데이터 없으면 단순 비율 (보수적 임계값)
+        # fallback: 일사 없으면 비율의 분포에서 이상치 탐지
         midday_avg = midday.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
         daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
         merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
         merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
-        # 보수적 임계값 — 일사 비교 없이는 오탐 위험이 크므로 0.3으로
-        merged["daytime_valley"] = (merged["midday_ratio"] < 0.3).astype(int)
+
+        ratio_mean = merged["midday_ratio"].mean()
+        ratio_std = merged["midday_ratio"].std()
+        threshold = ratio_mean - 2 * ratio_std if ratio_std > 0 else 0
+        merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
         return merged[["midday_ratio", "daytime_valley"]]
 
 
