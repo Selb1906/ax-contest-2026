@@ -57,32 +57,52 @@ def _signal_negative(df: pd.DataFrame) -> pd.DataFrame:
 # ── 신호 2: 낮 시간 골짜기 (12~15시 vs 일평균) ──
 
 
-def _load_btm_hourly(btm_csv_path: str = "kpx_BTM.csv") -> pd.Series | None:
-    """KPX BTM 시간별 데이터 로드 → 시간별 BTM 발전 강도."""
+def _load_asos_solar(asos_dir: str = "ASOS") -> pd.Series | None:
+    """ASOS 시간별 일사량 로드 → 전국 가중평균."""
     from pathlib import Path
-    p = Path(btm_csv_path)
+    p = Path(asos_dir)
     if not p.exists():
         return None
-    btm = pd.read_csv(p)
-    btm["datetime"] = pd.to_datetime(btm["datetime"])
-    # 01~24시 보정
-    if btm["datetime"].dt.hour.min() >= 1:
-        btm["datetime"] = btm["datetime"] - pd.Timedelta(hours=1)
-    btm["btm_mw"] = btm["total_solar_mw"] - btm["market_solar_mw"]
-    return btm.set_index("datetime")["btm_mw"]
+    try:
+        from .weather.asos import read_asos_directory, EIGHT_CITY_WEIGHTS
+        asos = read_asos_directory(str(p))
+        if "solar_mj" not in asos.columns:
+            return None
+        # 가중평균 일사량
+        asos["datetime_h"] = asos["ts"].dt.floor("h")
+        weighted = []
+        w_total = sum(EIGHT_CITY_WEIGHTS.values())
+        for dt, grp in asos.groupby("datetime_h"):
+            solar_w = 0.0
+            w_sum = 0.0
+            for _, row in grp.iterrows():
+                w = EIGHT_CITY_WEIGHTS.get(row["station_id"], 0) / w_total
+                if pd.notna(row["solar_mj"]):
+                    solar_w += row["solar_mj"] * w
+                    w_sum += w
+            if w_sum > 0:
+                weighted.append({"datetime_h": dt, "solar_mj": solar_w / w_sum})
+        if not weighted:
+            return None
+        wdf = pd.DataFrame(weighted)
+        return wdf.set_index("datetime_h")["solar_mj"]
+    except Exception:
+        return None
 
 
 def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
-    """BTM 발전 강도 기반 탐지 — KPX BTM csv 활용.
+    """BTM 탐지 — ASOS 일사량 기반 맑은 날/흐린 날 비교.
 
     핵심 논리:
-      KPX BTM 데이터에서 "BTM 발전이 많은 시간"과 "적은 시간"을 구분.
-      같은 고객이 BTM 발전 많은 시간에 유독 사용량이 낮으면 → BTM 의심.
+      ASOS 시간별 일사량을 LP에 조인.
+      같은 시간대(예: 13시) 내에서 일사 상위 30%(맑은 날) vs 하위 30%(흐린 날)의
+      고객 사용량 비교.
 
-      BTM 있는 고객: 발전 많은 시간에 계량값 급감 → high/low ratio 낮음
-      BTM 없는 고객: BTM 발전량과 무관 → high/low ratio ≈ 1.0
+      BTM 고객: 맑은 날에 발전 → 계량값 감소 → ratio < 1 + 음의 상관
+      일반 고객: 맑은 날에 냉방 → 사용량 증가 or 무관 → ratio ≥ 1
 
-    BTM csv 없으면 fallback으로 분포 기반 이상치 탐지.
+    판정: 전체 고객 분포에서 2σ 이상 벗어나는 고객.
+    ASOS 없으면 fallback (비율 분포 이상치).
     """
     t = pd.to_datetime(df[TS])
     d = df[[CUSTOMER_ID, TS, P_ACTIVE_KWH]].copy()
@@ -90,78 +110,68 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
     d["datetime_h"] = t.dt.floor("h")
     d["date"] = t.dt.normalize()
 
-    # KPX BTM 시간별 로드
-    btm_hourly = _load_btm_hourly()
+    # ASOS 일사량 로드 + 조인
+    solar_series = _load_asos_solar()
 
-    if btm_hourly is not None and len(btm_hourly) > 100:
-        # LP의 시간별 타임스탬프에 BTM 발전 강도 조인
-        d["btm_intensity"] = d["datetime_h"].map(btm_hourly).fillna(0)
+    if solar_series is not None and len(solar_series) > 100:
+        d["solar_mj"] = d["datetime_h"].map(solar_series)
 
-        # 낮 시간(10~15시)만 — 같은 시간대 내에서 비교
-        midday = d[d["hour"].between(10, 15)].copy()
+        # 낮 시간(10~15시)만, 일사 데이터 있는 행만
+        midday = d[(d["hour"].between(10, 15)) & (d["solar_mj"].notna())].copy()
 
-        # 같은 시간대별 BTM 발전량의 상위/하위를 나눔
-        # (낮 vs 밤이 아니라, 같은 13시끼리 맑은 날 vs 흐린 날)
-        midday["btm_rank"] = midday.groupby("hour")["btm_intensity"].rank(pct=True)
-        high_btm_mask = midday["btm_rank"] >= 0.7  # 같은 시간대 내 상위 30%
-        low_btm_mask = midday["btm_rank"] <= 0.3   # 같은 시간대 내 하위 30%
+        if len(midday) < 100:
+            # 일사 데이터 부족 → fallback
+            pass
+        else:
+            # 같은 시간대 내에서 일사 상위/하위 분류
+            midday["solar_rank"] = midday.groupby("hour")["solar_mj"].rank(pct=True)
 
-        results = []
-        for cid in midday[CUSTOMER_ID].unique():
-            cust = midday[midday[CUSTOMER_ID] == cid]
-            high = cust[high_btm_mask.loc[cust.index]][P_ACTIVE_KWH]
-            low = cust[low_btm_mask.loc[cust.index]][P_ACTIVE_KWH]
+            results = []
+            for cid in midday[CUSTOMER_ID].unique():
+                cust = midday[midday[CUSTOMER_ID] == cid]
+                sunny = cust[cust["solar_rank"] >= 0.7][P_ACTIVE_KWH]
+                cloudy = cust[cust["solar_rank"] <= 0.3][P_ACTIVE_KWH]
 
-            if len(high) < 10 or len(low) < 10:
-                results.append({CUSTOMER_ID: cid, "btm_load_ratio": 1.0, "btm_load_corr": 0.0})
-                continue
+                if len(sunny) < 10 or len(cloudy) < 10:
+                    results.append({CUSTOMER_ID: cid, "solar_load_ratio": 1.0, "solar_load_corr": 0.0})
+                    continue
 
-            ratio = high.mean() / low.mean() if low.mean() > 0 else 1.0
+                ratio = sunny.mean() / cloudy.mean() if cloudy.mean() > 0 else 1.0
+                corr = cust["solar_mj"].corr(cust[P_ACTIVE_KWH])
+                corr = corr if np.isfinite(corr) else 0.0
 
-            # 시간대 내 BTM 발전량과 사용량의 상관
-            corr = cust["btm_intensity"].corr(cust[P_ACTIVE_KWH])
-            corr = corr if np.isfinite(corr) else 0.0
+                results.append({
+                    CUSTOMER_ID: cid,
+                    "solar_load_ratio": float(ratio),
+                    "solar_load_corr": float(corr),
+                })
 
-            results.append({
-                CUSTOMER_ID: cid,
-                "btm_load_ratio": float(ratio),
-                "btm_load_corr": float(corr),
-            })
+            if results:
+                out = pd.DataFrame(results).set_index(CUSTOMER_ID)
 
-        out = pd.DataFrame(results).set_index(CUSTOMER_ID)
-        if len(out) == 0:
-            out["midday_ratio"] = 0.0
-            out["daytime_valley"] = 0
-            return out[["midday_ratio", "daytime_valley"]]
+                ratios = out["solar_load_ratio"]
+                corrs = out["solar_load_corr"]
+                r_mean, r_std = ratios.mean(), ratios.std()
+                c_mean, c_std = corrs.mean(), corrs.std()
+                r_th = r_mean - 2 * r_std if r_std > 0 else 0
+                c_th = c_mean - 2 * c_std if c_std > 0 else 0
 
-        # 통계적 판정: 전체 분포에서 이상치 (2σ)
-        ratios = out["btm_load_ratio"]
-        corrs = out["btm_load_corr"]
-        r_mean, r_std = ratios.mean(), ratios.std()
-        c_mean, c_std = corrs.mean(), corrs.std()
+                out["daytime_valley"] = ((ratios < r_th) & (corrs < c_th)).astype(int)
+                out["midday_ratio"] = out["solar_load_ratio"]
+                return out[["midday_ratio", "daytime_valley"]]
 
-        r_threshold = r_mean - 2 * r_std if r_std > 0 else 0
-        c_threshold = c_mean - 2 * c_std if c_std > 0 else 0
+    # fallback: ASOS 없으면 비율 분포 이상치
+    midday_f = d[d["hour"].between(10, 15)]
+    midday_avg = midday_f.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
+    daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
+    merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
+    merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
 
-        out["daytime_valley"] = (
-            (ratios < r_threshold) & (corrs < c_threshold)
-        ).astype(int)
-        out["midday_ratio"] = out["btm_load_ratio"]
-        return out[["midday_ratio", "daytime_valley"]]
-
-    else:
-        # fallback: BTM csv 없으면 비율 분포 이상치
-        midday = d[d["hour"].between(10, 15)]
-        midday_avg = midday.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("midday_avg")
-        daily_avg = d.groupby(CUSTOMER_ID, observed=True)[P_ACTIVE_KWH].mean().rename("daily_avg")
-        merged = pd.concat([midday_avg, daily_avg], axis=1).dropna()
-        merged["midday_ratio"] = merged["midday_avg"] / merged["daily_avg"].clip(lower=1e-9)
-
-        r_mean = merged["midday_ratio"].mean()
-        r_std = merged["midday_ratio"].std()
-        threshold = r_mean - 2 * r_std if r_std > 0 else 0
-        merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
-        return merged[["midday_ratio", "daytime_valley"]]
+    r_mean = merged["midday_ratio"].mean()
+    r_std = merged["midday_ratio"].std()
+    threshold = r_mean - 2 * r_std if r_std > 0 else 0
+    merged["daytime_valley"] = (merged["midday_ratio"] < threshold).astype(int)
+    return merged[["midday_ratio", "daytime_valley"]]
 
 
 # ── 신호 3: 수준 급변 (월 사용량 30%+ 하락 감지) ──
