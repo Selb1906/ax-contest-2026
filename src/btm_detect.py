@@ -97,33 +97,29 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
         # LP의 시간별 타임스탬프에 BTM 발전 강도 조인
         d["btm_intensity"] = d["datetime_h"].map(btm_hourly).fillna(0)
 
-        # 낮 시간(10~15시)만
+        # 낮 시간(10~15시)만 — 같은 시간대 내에서 비교
         midday = d[d["hour"].between(10, 15)].copy()
 
-        # 고객×일 단위 집계
-        daily = midday.groupby([CUSTOMER_ID, "date"], observed=True).agg(
-            load=(P_ACTIVE_KWH, "mean"),
-            btm_int=("btm_intensity", "mean"),
-        ).reset_index()
+        # 같은 시간대별 BTM 발전량의 상위/하위를 나눔
+        # (낮 vs 밤이 아니라, 같은 13시끼리 맑은 날 vs 흐린 날)
+        midday["btm_rank"] = midday.groupby("hour")["btm_intensity"].rank(pct=True)
+        high_btm_mask = midday["btm_rank"] >= 0.7  # 같은 시간대 내 상위 30%
+        low_btm_mask = midday["btm_rank"] <= 0.3   # 같은 시간대 내 하위 30%
 
         results = []
-        for cid, grp in daily.groupby(CUSTOMER_ID, observed=True):
-            if len(grp) < 20:
+        for cid in midday[CUSTOMER_ID].unique():
+            cust = midday[midday[CUSTOMER_ID] == cid]
+            high = cust[high_btm_mask.loc[cust.index]][P_ACTIVE_KWH]
+            low = cust[low_btm_mask.loc[cust.index]][P_ACTIVE_KWH]
+
+            if len(high) < 10 or len(low) < 10:
                 results.append({CUSTOMER_ID: cid, "btm_load_ratio": 1.0, "btm_load_corr": 0.0})
                 continue
 
-            # BTM 발전 상위 30% (발전 많은 날) vs 하위 30% (적은 날)
-            q70 = grp["btm_int"].quantile(0.7)
-            q30 = grp["btm_int"].quantile(0.3)
-            high_btm = grp[grp["btm_int"] >= q70]["load"]
-            low_btm = grp[grp["btm_int"] <= q30]["load"]
+            ratio = high.mean() / low.mean() if low.mean() > 0 else 1.0
 
-            if len(high_btm) < 5 or len(low_btm) < 5:
-                results.append({CUSTOMER_ID: cid, "btm_load_ratio": 1.0, "btm_load_corr": 0.0})
-                continue
-
-            ratio = high_btm.mean() / low_btm.mean() if low_btm.mean() > 0 else 1.0
-            corr = grp["btm_int"].corr(grp["load"])
+            # 시간대 내 BTM 발전량과 사용량의 상관
+            corr = cust["btm_intensity"].corr(cust[P_ACTIVE_KWH])
             corr = corr if np.isfinite(corr) else 0.0
 
             results.append({
