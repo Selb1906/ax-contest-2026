@@ -177,7 +177,12 @@ def main():
     print(f"  검침일: {meter_days_arg}")
 
     # 팀 모드
-    n_members = int(ask("작업 인원 (1~4):", default="1"))
+    n_members_raw = ask("작업 인원 (1~4):", default="1")
+    try:
+        n_members = int(n_members_raw)
+    except (TypeError, ValueError):
+        print(f"  잘못된 입력({n_members_raw}) → 기본값 1명으로 설정")
+        n_members = 1
     n_members = max(1, min(4, n_members))
     show_team_plan(n_members, source, train_end)
 
