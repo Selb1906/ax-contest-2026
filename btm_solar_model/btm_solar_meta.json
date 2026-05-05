@@ -1,0 +1,28 @@
+{
+  "feature_cols": [
+    "cdh_total",
+    "hdh_total",
+    "temp_mean",
+    "temp_max",
+    "temp_min",
+    "cdh_daytime",
+    "hdh_daytime",
+    "cdh_evening",
+    "hdh_evening",
+    "cdh_night",
+    "hdh_night",
+    "humidity_mean",
+    "wind_speed_mean",
+    "solar_mj_mean",
+    "month",
+    "year",
+    "months_since_start",
+    "daylight_hours",
+    "temp_loss"
+  ],
+  "target": "btm_mwh",
+  "train_end": "2024-12",
+  "test_mape": 13.91,
+  "test_rmse": 98281.0,
+  "best_iteration": 295
+}
