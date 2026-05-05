@@ -107,7 +107,7 @@ def check_leakage(features: pd.DataFrame, splits: dict) -> list[str]:
         warnings.append(f"train/test year_month 겹침: {overlap}")
 
     # 2. test의 year_month가 train보다 이전이면 시간 역전
-    if test["year_month"].min() <= train["year_month"].max():
+    if not train.empty and not test.empty and test["year_month"].min() <= train["year_month"].max():
         warnings.append(f"시간 역전: test min={test['year_month'].min()} <= train max={train['year_month'].max()}")
 
     # 3. customer_id가 test에만 있고 train에 없으면 cold start
