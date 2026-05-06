@@ -6,6 +6,8 @@
 사용법:
   python -m scripts.inspect_lp --path /path/to/lp/data
   python -m scripts.inspect_lp --path /path/to/lp/file.csv
+  python -m scripts.inspect_lp --scan          # LP 파일 자동 탐색
+  python -m scripts.inspect_lp --scan --root D:/   # 특정 드라이브부터 탐색
 """
 from __future__ import annotations
 
@@ -51,16 +53,24 @@ def try_read(path: Path, nrows: int = 5) -> tuple[pd.DataFrame | None, str]:
 def guess_column_map(columns: list[str]) -> dict[str, str]:
     """컬럼명에서 표준 매핑 추측."""
     patterns = {
-        "customer_id": ["고객", "cust", "id", "번호", "호수"],
-        "ts": ["일시", "검침", "날짜", "시간", "date", "time", "dt", "metering"],
-        "contract_type": ["계약", "종별", "용도", "contract", "type", "구분"],
-        "p_active_kwh": ["유효", "active", "전력량", "kwh", "사용량", "소비"],
-        "p_reactive_kwh": ["무효", "reactive", "kvarh", "무효전력"],
-        "max_demand_kw": ["최대수요", "max_demand", "피크", "peak", "최대전력"],
-        "n_households": ["세대", "household", "가구", "호수"],
-        "contract_power_kw": ["계약전력", "contract_power", "계약용량"],
-        "region_code": ["지역", "region", "시도", "행정", "area"],
-        "industry_code": ["업종", "industry", "산업"],
+        "customer_id": ["계약번호", "계기번호", "고객", "cust", "id", "번호"],
+        "ts_date": ["검침년월일", "검침일자"],
+        "ts_time": ["검침시분"],
+        "ts": ["일시", "검침", "날짜", "date", "time", "dt", "metering"],
+        "contract_type": ["계약종별", "계약", "종별", "용도", "contract"],
+        "p_active_kwh": ["유효전력량계", "유효", "active", "전력량", "kwh", "사용량"],
+        "p_reactive_lag": ["지상무효전력량계", "지상무효"],
+        "p_reactive_lead": ["진상무효전력량계", "진상무효"],
+        "p_reactive_kwh": ["무효전력량계", "무효", "reactive", "kvarh"],
+        "p_apparent_kwh": ["피상전력량계", "피상", "apparent"],
+        "max_demand_kw": ["최대수요", "max_demand", "피크", "peak"],
+        "n_households": ["세대", "household", "가구"],
+        "contract_power_kw": ["계약전력", "contract_power"],
+        "region_code": ["본부", "지사", "지역", "region", "시도"],
+        "supply_method": ["공급방식"],
+        "usage_purpose": ["전기사용용도", "사용용도"],
+        "industry_code": ["산업분류", "업종", "industry"],
+        "meter_interval": ["검침주기"],
     }
     mapping = {}
     for std_name, keywords in patterns.items():
@@ -73,10 +83,111 @@ def guess_column_map(columns: list[str]) -> dict[str, str]:
     return mapping
 
 
+def scan_for_lp(root: str | None = None) -> list[Path]:
+    """파일 시스템에서 LP 데이터로 추정되는 파일/디렉토리를 탐색."""
+    import os
+    import platform
+
+    candidates = []
+
+    # 탐색 시작점 결정
+    if root:
+        roots = [Path(root)]
+    elif platform.system() == "Windows":
+        roots = [Path(f"{d}:/") for d in "DEFCGHIJ" if Path(f"{d}:/").exists()]
+    else:
+        roots = [Path("/data"), Path("/home"), Path("/mnt"), Path("/")]
+
+    # LP 데이터 특성: CSV/parquet, 큰 용량, 한글 or LP 관련 이름
+    lp_keywords = ["lp", "load", "전력", "검침", "사용량", "ami", "meter", "고객"]
+    skip_dirs = {"Windows", "Program Files", "Program Files (x86)",
+                 "$Recycle.Bin", "System Volume Information",
+                 ".git", "__pycache__", "node_modules", "venv", ".venv"}
+
+    print(f"  탐색 시작: {[str(r) for r in roots]}")
+    print(f"  키워드: {lp_keywords}")
+    print()
+
+    for start in roots:
+        if not start.exists():
+            continue
+        try:
+            for dirpath, dirnames, filenames in os.walk(start):
+                # 시스템/불필요 디렉토리 건너뛰기
+                dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+
+                dp = Path(dirpath)
+                # 너무 깊으면 건너뛰기
+                if len(dp.parts) > 8:
+                    dirnames.clear()
+                    continue
+
+                for fn in filenames:
+                    fl = fn.lower()
+                    # CSV/parquet/xlsx 만 대상
+                    if not any(fl.endswith(ext) for ext in (".csv", ".parquet", ".xlsx", ".xls")):
+                        continue
+                    # 키워드 매치 또는 큰 파일(>10MB)
+                    fpath = dp / fn
+                    name_match = any(kw in fl or kw in str(dp).lower() for kw in lp_keywords)
+                    try:
+                        size_mb = fpath.stat().st_size / (1024 * 1024)
+                    except OSError:
+                        continue
+                    if name_match or size_mb > 10:
+                        candidates.append((fpath, size_mb, name_match))
+                        if len(candidates) >= 50:
+                            break
+                if len(candidates) >= 50:
+                    break
+        except PermissionError:
+            continue
+
+    # 정렬: 키워드 매치 우선, 그 다음 크기 순
+    candidates.sort(key=lambda x: (-x[2], -x[1]))
+    return candidates
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="LP 데이터 구조 탐색")
-    parser.add_argument("--path", required=True, help="LP 파일 또는 디렉터리 경로")
+    parser.add_argument("--path", default=None, help="LP 파일 또는 디렉터리 경로")
+    parser.add_argument("--scan", action="store_true",
+                        help="파일 시스템에서 LP 데이터 자동 탐색")
+    parser.add_argument("--root", default=None,
+                        help="탐색 시작 경로 (--scan과 함께 사용)")
     args = parser.parse_args()
+
+    if not args.path and not args.scan:
+        print("사용법:")
+        print("  python -m scripts.inspect_lp --path <경로>   # 경로 직접 지정")
+        print("  python -m scripts.inspect_lp --scan          # 자동 탐색")
+        print("  python -m scripts.inspect_lp --scan --root D:/")
+        return 1
+
+    # --scan 모드: LP 파일 탐색
+    if args.scan:
+        print(f"\n{'='*60}")
+        print("LP 데이터 자동 탐색")
+        print(f"{'='*60}\n")
+
+        candidates = scan_for_lp(args.root)
+
+        if not candidates:
+            print("  LP 데이터로 추정되는 파일을 찾지 못했습니다.")
+            print("  → 직원에게 데이터 경로를 문의하세요.")
+            return 1
+
+        print(f"\n  후보 {len(candidates)}건 발견:\n")
+        print(f"  {'#':>3s}  {'크기':>8s}  {'키워드':>4s}  경로")
+        print(f"  {'─'*3}  {'─'*8}  {'─'*4}  {'─'*50}")
+        for i, (fpath, size_mb, matched) in enumerate(candidates[:20]):
+            marker = "●" if matched else " "
+            print(f"  {i+1:>3d}  {size_mb:>7.1f}M  {marker:>4s}  {fpath}")
+
+        if not args.path:
+            print(f"\n  → 위 목록에서 확인 후 다시 실행:")
+            print(f"     python -m scripts.inspect_lp --path <선택한 경로>")
+            return 0
 
     target = Path(args.path)
 

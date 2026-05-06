@@ -1,14 +1,26 @@
-# 데이터안심구역 실 LP 소스 설정 — 스카우팅 방문 후 컬럼명 확정하여 복사·수정
+# 데이터안심구역 실 LP 소스 설정 — AX 경진대회 데이터 컬럼 기준
+# 출처: "AX 경진대회 데이터 컬럼.txt" (한전 제공)
 source:
   kind: dsz_lp
-  path: "/path/to/real_lp/"      # 안심구역 내 디렉터리 (CSV/parquet 모두)
-  # 원본 컬럼명 → 표준 컬럼명 매핑 (스카우팅에서 확인)
+  path: "/path/to/real_lp/"      # 안심구역 내 디렉터리 (CSV/parquet/xlsx)
+
   column_map:
-    customer_id:   "고객번호"
-    ts:            "검침일시"
-    contract_type: "계약종별"
-    p_active_kwh:  "유효전력량"
-    p_reactive_kwh: "무효전력량"
-    max_demand_kw: "최대수요전력"
-  # 원본에 계약종별 컬럼이 없고 파일이 종별로 분리돼 있다면 이 필드로 덮어쓰기
+    # 필수
+    customer_id:     "계약번호"       # 또는 "계기번호" — 현장에서 확인
+    ts_date:         "검침년월일"     # 날짜 (별도 컬럼)
+    ts_time:         "검침시분"       # 시간 (별도 컬럼)
+    contract_type:   "계약종별"
+    p_active_kwh:    "유효전력량계"
+
+    # 선택 (있으면 자동 활용)
+    p_reactive_lead: "진상무효전력량계"   # 진상 무효전력
+    p_reactive_lag:  "지상무효전력량계"   # 지상 무효전력
+    p_apparent_kwh:  "피상전력량계"
+    contract_power_kw: "계약전력"
+    region_code:     "본부"            # 또는 "지사" — 기상 관측소 매칭용
+    industry_code:   "산업분류"
+    supply_method:   "공급방식"        # 저압/고압 구분
+    usage_purpose:   "전기사용용도"
+    meter_interval:  "검침주기"        # 15분 등
+
   contract_type_default: null

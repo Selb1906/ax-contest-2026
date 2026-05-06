@@ -167,6 +167,29 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
             except UnicodeDecodeError:
                 d = pd.read_csv(sp, encoding="cp949")
         d = d.rename(columns=reverse_map)
+
+        # 날짜+시간 분리 컬럼 처리 (검침년월일 + 검침시분 → ts)
+        if TS not in d.columns and "ts_date" in d.columns and "ts_time" in d.columns:
+            date_str = d["ts_date"].astype(str).str.strip()
+            time_str = d["ts_time"].astype(str).str.strip().str.zfill(4)
+            # 2400 → 0000+1일 보정
+            is_2400 = time_str == "2400"
+            time_str = time_str.replace("2400", "0000")
+            combined = date_str + " " + time_str.str[:2] + ":" + time_str.str[2:]
+            d[TS] = pd.to_datetime(combined, errors="coerce")
+            if is_2400.any():
+                d.loc[is_2400, TS] = d.loc[is_2400, TS] + pd.Timedelta(days=1)
+            d = d.drop(columns=["ts_date", "ts_time"], errors="ignore")
+            print(f"  [ts 조합] 검침년월일 + 검침시분 → ts ({d[TS].iloc[0]})")
+
+        # 무효전력 지상/진상 합산
+        if "p_reactive_lag" in d.columns or "p_reactive_lead" in d.columns:
+            lag = pd.to_numeric(d.get("p_reactive_lag", 0), errors="coerce").fillna(0)
+            lead = pd.to_numeric(d.get("p_reactive_lead", 0), errors="coerce").fillna(0)
+            d[P_REACTIVE_KWH] = lag + lead
+            d = d.drop(columns=["p_reactive_lag", "p_reactive_lead"], errors="ignore")
+            print(f"  [무효전력] 지상 + 진상 → p_reactive_kwh 합산")
+
         if TS in d.columns:
             # 시간 형식 자동 감지 + 보정
             ts_raw = d[TS]
