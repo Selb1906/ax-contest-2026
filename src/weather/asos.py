@@ -161,7 +161,7 @@ def monthly_weather_features(
     return result
 
 
-# ── 가중평균 (논문 기반 8대 도시) ──
+# ── 가중평균 (참고문헌 기반 8대 도시) ──
 
 # 출처: 임종훈 외 (2013), 표6 개선된 인구수 기준
 EIGHT_CITY_WEIGHTS = {

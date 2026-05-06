@@ -159,7 +159,7 @@ def main():
     if copied:
         print(f"\n[저장] sliding 상세 분석 {copied}개 → export/sliding_*.csv")
 
-    # 논문용 이미지 복사
+    # 보고서용 이미지 복사
     fig_dir = ROOT / "figures"
     if fig_dir.exists():
         (OUT / "figures").mkdir(exist_ok=True)
@@ -169,7 +169,7 @@ def main():
             shutil.copy2(f, OUT / "figures" / f.name)
             fig_count += 1
         if fig_count:
-            print(f"\n[저장] 논문용 이미지 {fig_count}개 → export/figures/")
+            print(f"\n[저장] 보고서용 이미지 {fig_count}개 → export/figures/")
 
     # SHAP 이미지 복사
     explain_dir = ROOT / "explain_results"

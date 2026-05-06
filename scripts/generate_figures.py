@@ -1,4 +1,4 @@
-"""논문/보고서용 시각화 자동 생성.
+"""분석 보고서용 시각화 자동 생성.
 
 파이프라인 결과 파일을 읽어서 고품질 PNG를 figures/ 디렉터리에 저장한다.
 데이터안심구역에서 한 번만 실행하므로 가능한 모든 차트를 일괄 생성.
@@ -53,7 +53,7 @@ FIG_DIR = ROOT / "figures"
 DPI = 300
 FACECOLOR = "white"
 
-# 색상 팔레트 (논문 친화)
+# 색상 팔레트 (보고서 친화)
 COLORS = {
     "primary": "#2563EB",
     "secondary": "#DC2626",
@@ -363,7 +363,7 @@ def fig04_monthly_error_boxplot():
         positions=list(range(len(months))),
         widths=0.6,
         patch_artist=True,
-        showfliers=False,  # 이상치 생략 (깔끔한 논문 스타일)
+        showfliers=False,  # 이상치 생략 (깔끔한 보고서 스타일)
         medianprops=dict(color="black", linewidth=1.5),
     )
     for patch, color in zip(bp["boxes"], month_colors):
@@ -892,7 +892,7 @@ def main() -> int:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     print(f"""
 ===================================================
-  논문/보고서용 시각화 자동 생성
+  분석 보고서용 시각화 자동 생성
   출력: {FIG_DIR}/
   DPI: {DPI}
 ===================================================

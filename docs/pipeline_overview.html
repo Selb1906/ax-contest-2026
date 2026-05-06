@@ -204,7 +204,7 @@
     <div class="card-title">기상 가중치 <span class="badge b-blue">8가지+</span></div>
     <table>
       <tr><th>기존 방식</th><th>설명</th></tr>
-      <tr><td>v1 논문</td><td>임종훈 외 (2013) 개선 인구 기준</td></tr>
+      <tr><td>v1 참고문헌</td><td>임종훈 외 (2013) 개선 인구 기준</td></tr>
       <tr><td>v2 판매량</td><td>전력판매량 기준</td></tr>
       <tr><td>v3 인구</td><td>인구수 기준</td></tr>
       <tr><td>v4 균등</td><td>8개 도시 균등</td></tr>
@@ -351,12 +351,12 @@
 <h2>기상 데이터 — ASOS 8대 도시 (2020~2026, 7년)</h2>
 <p style="margin-bottom:12px; font-size:0.9rem;">
   전력 수요는 기온(냉난방)에 크게 영향받습니다. 3,500호의 지역이 어디인지 모를 수 있어서,
-  <strong>전력거래소 논문 기반으로 8대 도시 기온을 가중평균</strong>하여 전국 대표 기상 데이터를 만듭니다.
+  <strong>전력거래소 참고문헌 기반으로 8대 도시 기온을 가중평균</strong>하여 전국 대표 기상 데이터를 만듭니다.
   가중치는 전력판매량·인구 기반이며, 안심구역에서 실 LP와의 상관으로 <strong>최적 가중치를 역산</strong>할 수도 있습니다.
   CDH(Cooling Degree Hours)는 일평균 CDD보다 정확 — 시간별로 산출하여 낮/저녁/야간을 분리합니다.
 </p>
 <table>
-  <tr><th>관측소</th><th>도시</th><th>맵핑</th><th>가중치 (논문 표6)</th></tr>
+  <tr><th>관측소</th><th>도시</th><th>맵핑</th><th>가중치 (참고문헌 표6)</th></tr>
   <tr><td>108</td><td>서울</td><td>서울+경기북부</td><td>43.76%</td></tr>
   <tr><td>112</td><td>인천</td><td>인천</td><td>5.58%</td></tr>
   <tr><td>119</td><td>수원</td><td>경기남부</td><td>4.48%</td></tr>
@@ -655,7 +655,7 @@ data/weather/ (ASOS 가중평균 5버전 + 8개 스테이션)</div>
     <td><span class="badge b-orange">미검증</span></td>
     <td>안심구역에서</td>
     <td>
-      현재 논문 기반 가중치로 5개 버전 + LP역산/계절별 CSV 생성 완료.<br>
+      현재 참고문헌 기반 가중치로 5개 버전 + LP역산/계절별 CSV 생성 완료.<br>
       <strong>실 LP와 매칭하여 어떤 가중치가 최적인지는 안심구역에서 확인 필요.</strong>
     </td>
   </tr>
