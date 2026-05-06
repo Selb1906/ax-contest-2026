@@ -24,6 +24,31 @@ th { background: #f1f5f9; font-weight: 600; }
 <h1>분석 실행 가이드</h1>
 <p>전기요금 과다발생 사전 예측모델 -- 안심구역 분석 절차</p>
 
+<h2>0. 터미널 열기 + 코드 폴더 이동</h2>
+<p>먼저 직원에게 <strong>"코드가 어디에 설치되었나요?"</strong>를 확인합니다.</p>
+
+<h3>Windows인 경우</h3>
+<p><strong>방법 1)</strong> 파일 탐색기에서 코드 폴더를 연 뒤, 주소창을 클릭하고 <code>cmd</code> 입력 후 Enter</p>
+<p><strong>방법 2)</strong> 시작 메뉴 → "명령 프롬프트" 또는 "PowerShell" 실행 후:</p>
+<pre><code># 예시 (실제 경로로 변경)
+cd /d D:\분석환경\코드폴더</code></pre>
+
+<h3>Linux인 경우</h3>
+<p>터미널을 열고:</p>
+<pre><code># 예시 (실제 경로로 변경)
+cd /home/사용자/코드폴더</code></pre>
+
+<div class="tip step">
+<strong>코드 경로를 모를 때:</strong> Windows에서 <code>dir /s /b C:\*.yaml 2>nul | findstr source_dsz</code>, Linux에서 <code>find / -name "source_dsz.yaml" 2>/dev/null</code> 로 찾을 수 있습니다.
+</div>
+
+<h3>Python 확인</h3>
+<pre><code>python --version
+# Python 3.9 이상이면 OK. 안 되면 python3 --version 시도</code></pre>
+<div class="tip step">
+<strong>Linux에서 python이 안 될 때:</strong> <code>python3</code>으로 실행. 아래 모든 명령에서 <code>python</code>을 <code>python3</code>으로 대체하면 됩니다.
+</div>
+
 <h2>1. 환경 검증</h2>
 <div class="step">
 <span class="step-num">1</span> 패키지가 모두 설치되었는지 확인
