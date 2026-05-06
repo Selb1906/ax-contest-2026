@@ -75,6 +75,11 @@ def objective(trial, X_tr, y_tr, X_val, y_val, spec):
     trial.set_user_attr("best_iteration", booster.best_iteration)
     trial.set_user_attr("num_trees", booster.num_trees())
 
+    # 진행 상황 출력
+    n = trial.number + 1
+    best_so_far = min(mape, trial.study.best_value if trial.study.best_trial else mape)
+    print(f"  #{n:>3d}  MAPE {mape:.3f}%  trees {booster.best_iteration}  best {best_so_far:.3f}%")
+
     return mape
 
 
