@@ -1,7 +1,10 @@
-import sys; sys.path.insert(0, 'E:/AX_Contest')
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.weather.asos import read_asos_directory
 
-df = read_asos_directory('E:/AX_Contest/ASOS')
+ROOT = Path(__file__).resolve().parents[1]
+df = read_asos_directory(str(ROOT / "ASOS"))
 print(f'rows: {len(df):,}')
 print(f'period: {df["ts"].min()} ~ {df["ts"].max()}')
 print(f'years: {sorted(df["ts"].dt.year.unique())}')

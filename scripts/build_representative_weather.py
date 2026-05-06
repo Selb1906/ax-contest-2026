@@ -28,8 +28,9 @@ from src.weather.asos import (
     weighted_national_average,
 )
 
-ASOS_DIR = Path("E:/AX_Contest/ASOS")
-OUT_DIR = Path("E:/AX_Contest/data/weather")
+ROOT = Path(__file__).resolve().parents[1]
+ASOS_DIR = ROOT / "ASOS"
+OUT_DIR = ROOT / "data" / "weather"
 
 # 논문 표6: 개선된 인구수 기준 (최종 채택)
 W_V1_PAPER = {

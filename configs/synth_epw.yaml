@@ -48,7 +48,7 @@ max_demand:   { multiplier_min: 1.1, multiplier_max: 1.5 }
 # 핵심 차이: 실측 2022 서울 기온을 주입
 weather:
   source: epw
-  epw_directory: "C:/Users/abc/Desktop/zero_shot/EPW_13개소"
+  epw_directory: "./data/weather/epw"  # EPW 파일 디렉토리 (프로젝트 루트 기준 상대경로)
   station_id: "108"     # 서울 (다른 도시 원하면 101/105/108/112/119/131/133/143/146/156/159/165/184)
   # 범위 밖 fallback 용 합성 파라미터
   mean_annual: 12.5

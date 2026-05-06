@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
 import lightgbm as lgb
 import numpy as np
@@ -486,7 +486,7 @@ def main() -> int:
     if r_opt:
         all_results.append(r_opt)
         improvement = baseline_mape - r_opt["mape_10d"]
-        print(f"  최적 조합 MAPE: {r_opt['mape_mean']:.3f}%")
+        print(f"  최적 조합 MAPE: {r_opt['mape_10d']:.3f}%")
         print(f"  기본 대비 개선: {improvement:+.3f}% ({improvement/baseline_mape*100:.1f}%)")
 
     # 결과 저장

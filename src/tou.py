@@ -53,8 +53,17 @@ def classify_tou(hour: int, season: str) -> str:
     return "off_peak"
 
 
-def add_tou_columns(df: pd.DataFrame, ts_col: str = "ts") -> pd.DataFrame:
-    """DataFrame에 season, tou_period 컬럼 추가."""
+def add_tou_columns(
+    df: pd.DataFrame,
+    ts_col: str = "ts",
+    apply_day_rules: bool = True,
+) -> pd.DataFrame:
+    """DataFrame에 season, tou_period 컬럼 추가.
+
+    apply_day_rules=True이면 한전 규정 적용:
+      - 토요일: on_peak → mid_peak
+      - 공휴일: 전체 → off_peak
+    """
     out = df.copy()
     ts = pd.to_datetime(out[ts_col])
     months = ts.dt.month
@@ -64,12 +73,38 @@ def add_tou_columns(df: pd.DataFrame, ts_col: str = "ts") -> pd.DataFrame:
     out["tou_period"] = [
         classify_tou(h, s) for h, s in zip(hours, out["season"])
     ]
+
+    if apply_day_rules:
+        dow = ts.dt.dayofweek  # 0=월 ~ 6=일
+        is_saturday = dow == 5
+
+        # 공휴일 판별
+        try:
+            from .special_days import load_holidays
+            hol_df = load_holidays()
+            holiday_dates = set(pd.to_datetime(hol_df["date"]).dt.normalize())
+            is_holiday = ts.dt.normalize().isin(holiday_dates) | (dow == 6)
+        except Exception:
+            is_holiday = dow == 6  # 공휴일 로드 실패 시 일요일만
+
+        # 토요일: on_peak → mid_peak
+        sat_on = is_saturday & (out["tou_period"] == "on_peak")
+        out.loc[sat_on, "tou_period"] = "mid_peak"
+
+        # 공휴일: 전체 → off_peak
+        out.loc[is_holiday, "tou_period"] = "off_peak"
+
     return out
 
 
-def tou_usage_ratios(df: pd.DataFrame, ts_col: str = "ts", value_col: str = "p_active_kwh") -> pd.DataFrame:
+def tou_usage_ratios(
+    df: pd.DataFrame,
+    ts_col: str = "ts",
+    value_col: str = "p_active_kwh",
+    apply_day_rules: bool = True,
+) -> pd.DataFrame:
     """고객×월별 TOU 시간대 사용량 비율 산출 — 피처용."""
-    d = add_tou_columns(df, ts_col)
+    d = add_tou_columns(df, ts_col, apply_day_rules=apply_day_rules)
     d["year_month"] = pd.to_datetime(d[ts_col]).dt.to_period("M")
 
     total = d.groupby(["customer_id", "year_month"])[value_col].sum().rename("total_kwh")

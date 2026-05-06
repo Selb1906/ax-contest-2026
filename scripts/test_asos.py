@@ -8,7 +8,8 @@ from src.weather.asos import (
     monthly_weather_features, weighted_national_average,
 )
 
-df = read_asos_directory("E:/AX_Contest/ASOS")
+ROOT = Path(__file__).resolve().parents[1]
+df = read_asos_directory(str(ROOT / "ASOS"))
 sids = sorted(df["station_id"].unique())
 print(f"rows: {len(df):,}  stations: {sids}")
 print(f"period: {df['ts'].min()} ~ {df['ts'].max()}")

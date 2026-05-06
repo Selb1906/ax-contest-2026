@@ -1,4 +1,6 @@
-import sys; sys.path.insert(0, 'E:/AX_Contest')
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.tariff import estimate_bill, list_supported_contracts
 
 print("지원 계약종별:")

@@ -1,8 +1,11 @@
-import sys; sys.path.insert(0, 'E:/AX_Contest')
+import sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 import pandas as pd
 import numpy as np
 
-df = pd.read_csv('E:/AX_Contest/kpx_BTM.csv')
+df = pd.read_csv(str(ROOT / 'kpx_BTM.csv'))
 df['datetime'] = pd.to_datetime(df['datetime'])
 
 print('=== 스키마 ===')

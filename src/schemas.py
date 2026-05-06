@@ -31,9 +31,73 @@ OPTIONAL_COLUMNS: tuple[str, ...] = (
     MAX_DEMAND_KW,
 )
 
-CONTRACT_TYPES: tuple[str, ...] = ("주택용", "일반용")
+CONTRACT_TYPES: tuple[str, ...] = (
+    "주택용", "주택용(고압)",
+    "일반용", "일반용(갑)I", "일반용(갑)II",
+    "일반용(을)", "일반용(을)저압", "일반용(을)고압A", "일반용(을)고압B",
+)
 
 INTERVAL_MINUTES = 15
+
+
+import re as _re
+
+# 계약종별 정규화: 다양한 표기를 표준 형태로 통일
+# "일반용[을]" "일반용_을" "일반용-을" "일반용 (을)" 등 → "일반용(을)"
+_NORMALIZE_MAP = {
+    "주택": "주택용",
+    "주택용저압": "주택용",
+    "주택용고압": "주택용(고압)",
+    "일반용갑1": "일반용(갑)I",
+    "일반용갑i": "일반용(갑)I",
+    "일반용갑2": "일반용(갑)II",
+    "일반용갑ii": "일반용(갑)II",
+    "일반용갑": "일반용(갑)I",
+    "일반용을저압": "일반용(을)저압",
+    "일반용을고압a": "일반용(을)고압A",
+    "일반용을고압b": "일반용(을)고압B",
+    "일반용을고압c": "일반용(을)고압C",
+    "일반용을": "일반용(을)",
+    "일반용": "일반용",
+}
+
+
+def normalize_contract_type(raw: str) -> str:
+    """다양한 표기의 계약종별을 표준 형태로 정규화.
+
+    괄호 종류 통일, 구분자 제거, 로마숫자 변환 후 매칭.
+    매칭 실패 시 원본 반환 (LightGBM 카테고리로는 그대로 사용 가능).
+    """
+    if not raw or not isinstance(raw, str):
+        return raw
+
+    s = raw.strip()
+
+    # 1) 괄호 통일: [] {} 【】 → ()
+    s = _re.sub(r'[\[【{]', '(', s)
+    s = _re.sub(r'[\]】}]', ')', s)
+
+    # 2) 구분자 제거 + 소문자화: 공백, _, -, · 제거
+    key = _re.sub(r'[\s_\-·.]+', '', s).lower()
+
+    # 3) 괄호도 제거한 키 (매칭용)
+    key_noparen = _re.sub(r'[()]', '', key)
+
+    # 4) 로마숫자 통일: Ⅰ→i, Ⅱ→ii, Ⅲ→iii
+    key_noparen = key_noparen.replace('ⅰ', 'i').replace('ⅱ', 'ii').replace('ⅲ', 'iii')
+
+    # 5) 긴 키부터 매칭 (부분 일치 방지)
+    for pattern, standard in sorted(_NORMALIZE_MAP.items(), key=lambda x: -len(x[0])):
+        if key_noparen == pattern:
+            return standard
+
+    # 6) 괄호 있는 원본으로 재시도 (괄호 정규화만 적용)
+    key_with_paren = _re.sub(r'[\s_\-·.]+', '', s)
+    for ct in CONTRACT_TYPES:
+        if key_with_paren == ct:
+            return ct
+
+    return s
 
 
 @dataclass(frozen=True)
@@ -61,8 +125,11 @@ def validate(df: pd.DataFrame, *, strict: bool = True) -> SchemaReport:
 
     if CONTRACT_TYPE in df.columns:
         bad = set(df[CONTRACT_TYPE].dropna().unique()) - set(CONTRACT_TYPES)
-        if strict and bad:
-            raise ValueError(f"unexpected contract_type values: {bad}")
+        if bad:
+            import warnings
+            warnings.warn(
+                f"unknown contract_type values: {bad} — 요금 계산 시 기본값 적용"
+            )
 
     if P_ACTIVE_KWH in df.columns and (df[P_ACTIVE_KWH] < 0).any():
         if strict:

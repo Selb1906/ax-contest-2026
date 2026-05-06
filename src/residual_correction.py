@@ -28,15 +28,30 @@ def build_residual_features(
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """잔차 보정용 피처 구성.
 
-    잔차의 체계적 패턴을 잡기 위한 피처:
+    정적 피처 (시간/그룹 축):
     - month: 계절별 편향
     - horizon_days: +10일 vs +20일 차이
     - disruption_ratio: 특수일 보정
-    - pred_1 자체: 예측값 크기에 비례하는 오차
+
+    AMI 패턴 피처 (관측 기간 내 15분 데이터에서 산출, 고객-월 특화):
+    - observed_peak_ratio: 피크 시간대 비율 변화 → 냉방/난방 패턴 이탈 감지
+    - observed_load_factor: 부하율 → 사용 패턴 안정성
+    - observed_daily_cv: 일별 변동계수 → 비정상 사용일 존재 여부
+    - observed_weekend_weekday_ratio: 주말/평일 비율 → 업무일 변화
+    - observed_power_factor: 역률 → 설비 변화
+    - pf_vs_prev_month: 전월 대비 역률 변화
+    - partial_rate: 관측 비율 (관측 kWh / 전체 kWh)
+
+    1차 예측값 피처:
+    - pred_1: 예측값 크기에 비례하는 오차
+    - pred_1_log: 로그 스케일
+    - pred_vs_partial: 예측 대비 관측 비율 → 잔여 기간 불확실성
     """
     residuals = actuals - predictions
 
     res_features = pd.DataFrame()
+
+    # 정적 피처
     if "month" in features.columns:
         res_features["month"] = features["month"].values
     if "horizon_days" in features.columns:
@@ -46,8 +61,29 @@ def build_residual_features(
     if "contract_type" in features.columns:
         res_features["is_residential"] = (features["contract_type"] == "주택용").astype(int).values
 
+    # AMI 패턴 피처 — 관측 기간의 15분 데이터에서 이미 산출됨
+    ami_cols = [
+        "observed_peak_ratio", "observed_load_factor", "observed_daily_cv",
+        "observed_weekend_weekday_ratio", "observed_power_factor",
+        "pf_vs_prev_month", "observed_night_ratio", "observed_reactive_ratio",
+    ]
+    for col in ami_cols:
+        if col in features.columns:
+            res_features[col] = features[col].values
+
+    # 관측 비율 (partial_kwh가 전체 대비 어느 정도인지)
+    if "partial_rate" in features.columns:
+        res_features["partial_rate"] = features["partial_rate"].values
+
+    # 1차 예측값 피처
     res_features["pred_1"] = predictions
     res_features["pred_1_log"] = np.log1p(np.abs(predictions))
+
+    # 예측 대비 관측 비율
+    if "partial_kwh" in features.columns:
+        partial = features["partial_kwh"].values
+        safe_pred = np.where(np.abs(predictions) > 1e-9, predictions, 1e-9)
+        res_features["pred_vs_partial"] = partial / safe_pred
 
     return res_features, residuals
 

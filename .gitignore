@@ -56,5 +56,21 @@ _task_brief.txt
 # Streamlit
 .streamlit/
 
+# 반출 산출물 (안심구역에서 생성)
+export/
+figures/
+residual_correction/
+dashboard.html
+
+# 레퍼런스 (외부 프로젝트)
+_ref_dash/
+
+# 반입 번들 추가
+dsz_wheels.zip
+dsz_bundle/code/
+
+# 한글 파일 (제출 양식, 자료실 등)
+자료실/
+
 # 임시
 _zip_staging*/

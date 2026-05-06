@@ -36,6 +36,7 @@ from .schemas import (
     P_APPARENT_KWH,
     P_REACTIVE_KWH,
     TS,
+    normalize_contract_type,
 )
 
 
@@ -125,17 +126,15 @@ def _load_public_apt(cfg: SourceConfig) -> pd.DataFrame:
 def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
     """안심구역 실 LP 로드 — column_map 으로 컬럼을 표준으로 rename.
 
-    예상 원본 컬럼(스카우팅 후 확정):
-      고객번호, 검침일시, 계약종별, 유효전력량(kWh),
-      무효전력량(kVarh), 최대수요전력(kW)
+    AX 경진대회 데이터 컬럼 (한전 제공):
+      계기번호, 계약번호, 검침년월일, 검침시분, 검침주기,
+      유효전력량계, 지상무효전력량계, 진상무효전력량계, 피상전력량계,
+      본부, 지사, 계약종별, 공급방식, 계약전력, 전기사용용도, 산업분류
 
-    column_map 예:
-      customer_id: "고객번호"
-      ts: "검침일시"
-      contract_type: "계약종별"
-      p_active_kwh: "유효전력량"
-      p_reactive_kwh: "무효전력량"
-      max_demand_kw: "최대수요전력"
+    자동 처리:
+      - 검침년월일 + 검침시분 → ts (2400→0000+1일 보정 포함)
+      - 지상무효 + 진상무효 → p_reactive_kwh 합산
+      - 공급방식/전기사용용도/산업분류/지사 → 카테고리 피처로 보존
     """
     if not cfg.column_map:
         raise ValueError("dsz_lp: column_map 이 필요합니다 (스카우팅 후 설정)")
@@ -218,6 +217,14 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
 
         if CONTRACT_TYPE not in d.columns and cfg.contract_type_default:
             d[CONTRACT_TYPE] = cfg.contract_type_default
+
+        # 지사 → region_sub (본부보다 세분화된 지역)
+        if "region_sub" in d.columns and "region_code" not in d.columns:
+            d["region_code"] = d["region_sub"]
+            d = d.drop(columns=["region_sub"])
+        elif "region_sub" in d.columns and "region_code" in d.columns:
+            pass  # 본부(region_code) 우선, 지사는 별도 유지
+
         frames.append(d)
     df = pd.concat(frames, ignore_index=True)
     return df
@@ -244,6 +251,17 @@ def load(cfg: SourceConfig, *, validate: bool = True) -> pd.DataFrame:
     df = schemas.ensure_columns(
         df, [P_REACTIVE_KWH, P_APPARENT_KWH, MAX_DEMAND_KW]
     )
+    # 계약종별 정규화 (다양한 표기 → 표준 형태)
+    if CONTRACT_TYPE in df.columns:
+        raw_types = df[CONTRACT_TYPE].dropna().unique()
+        df[CONTRACT_TYPE] = df[CONTRACT_TYPE].map(
+            lambda x: normalize_contract_type(x) if isinstance(x, str) else x
+        )
+        new_types = df[CONTRACT_TYPE].dropna().unique()
+        changed = set(raw_types) - set(new_types)
+        if changed:
+            print(f"  [계약종별 정규화] {len(raw_types)}종 → {len(new_types)}종")
+        print(f"  계약종별: {sorted(new_types)}")
     if validate:
         schemas.validate(df, strict=False)
     return df

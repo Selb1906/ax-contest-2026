@@ -333,12 +333,23 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
         )
         extra_num.append("kwh_per_household")
 
-    # 지역코드가 있으면 categorical에 추가
+    # 카테고리 피처 자동 감지
     extra_cat = ["contract_type"]
-    if "region_code" in df.columns:
-        lookup = df.groupby(CUSTOMER_ID)["region_code"].first().reset_index()
-        horizon = horizon.merge(lookup, on=CUSTOMER_ID, how="left")
-        extra_cat.append("region_code")
+    _CAT_CANDIDATES = [
+        "region_code",      # 본부
+        "region_sub",       # 지사
+        "supply_method",    # 공급방식 (저압/고압)
+        "usage_purpose",    # 전기사용용도
+        "industry_code",    # 산업분류
+    ]
+    for col in _CAT_CANDIDATES:
+        if col in df.columns and df[col].notna().sum() > 0:
+            nunique = df[col].nunique()
+            if nunique > 1:
+                lookup = df.groupby(CUSTOMER_ID)[col].first().reset_index()
+                horizon = horizon.merge(lookup, on=CUSTOMER_ID, how="left")
+                extra_cat.append(col)
+                print(f"  [피처] {col}: {nunique}종 카테고리 추가")
 
     spec = FeatureSpec(
         has_weather=weather is not None,

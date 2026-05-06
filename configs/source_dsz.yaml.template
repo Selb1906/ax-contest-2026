@@ -17,7 +17,8 @@ source:
     p_reactive_lag:  "지상무효전력량계"   # 지상 무효전력
     p_apparent_kwh:  "피상전력량계"
     contract_power_kw: "계약전력"
-    region_code:     "본부"            # 또는 "지사" — 기상 관측소 매칭용
+    region_code:     "본부"            # 기상 관측소 매칭용 (상위 지역)
+    region_sub:      "지사"            # 세분화 지역 (카테고리 피처)
     industry_code:   "산업분류"
     supply_method:   "공급방식"        # 저압/고압 구분
     usage_purpose:   "전기사용용도"

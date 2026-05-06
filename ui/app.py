@@ -21,7 +21,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.tariff import estimate_bill, bill_increase_analysis
+from src.tariff import (
+    estimate_bill, bill_increase_analysis, final_bill, list_supported_contracts,
+    CLIMATE_ENV_RATE, FUEL_ADJ_RATE, VAT_RATE, FUND_RATE,
+    WELFARE_DISCOUNTS, calc_welfare_discount,
+)
 from src.tou import get_season
 
 # ── 스타일 ──
@@ -409,65 +413,154 @@ def fleet_view(daily, monthly, preds, ctx, metrics):
 # ── 탭 3: 요금 분석 ──
 
 def tariff_view(monthly, preds, ctx):
+    # ── 사이드바: 단가 + 할인 설정 ──
+    with st.sidebar:
+        st.markdown("### 요금 단가 설정")
+        st.caption("분기별 고시 단가에 맞춰 조정")
+        climate_rate = st.number_input(
+            "기후환경요금 (원/kWh)", 0.0, 30.0, CLIMATE_ENV_RATE, 0.1,
+            help="2026년 2분기 기준 9.0원/kWh")
+        fuel_rate = st.number_input(
+            "연료비조정요금 (원/kWh)", -5.0, 5.0, FUEL_ADJ_RATE, 0.1,
+            help="상하한 ±5원/kWh. 2026년 2분기 +5.0원")
+        st.divider()
+        st.markdown("### 복지 할인")
+        welfare_options = list(WELFARE_DISCOUNTS.keys())
+        welfare_type = st.selectbox(
+            "할인 유형", welfare_options, index=0,
+            help="주택용 고객 대상. 일반용은 해당 없음")
+        w_info = WELFARE_DISCOUNTS[welfare_type]
+        if welfare_type != "없음":
+            st.caption(f"{w_info['label']}")
+        st.divider()
+        st.caption(f"부가세: {VAT_RATE*100:.0f}% · 기반기금: {FUND_RATE*100:.1f}%")
+
+    # ── 입력 ──
+    input_cols = st.columns([2, 2, 1, 1])
+    with input_cols[0]:
+        sim_ct = st.selectbox("계약종별", list_supported_contracts(), index=0, key="tariff_ct")
+    with input_cols[1]:
+        sim_kwh = st.slider("월 사용량 (kWh)", 50, 50000, 1000, 50)
+    with input_cols[2]:
+        sim_month = st.selectbox("월", list(range(1, 13)), index=6, key="tariff_month")
+    with input_cols[3]:
+        sim_demand = st.number_input("계약전력 (kW)", 0, 10000, 0, 10, key="tariff_demand")
+
+    bill = final_bill(sim_kwh, sim_ct, sim_month,
+                      max_demand_kw=sim_demand,
+                      climate_rate=climate_rate, fuel_rate=fuel_rate,
+                      welfare_type=welfare_type)
+
+    # ── 상단 KPI ──
+    kpi_cols = st.columns(4)
+    with kpi_cols[0]:
+        metric_card("전기요금", f"{bill['elec_won']:,}원",
+                    f"기본 {bill['base_won']:,} + 전력량 {bill['energy_won']:,}", "neutral")
+    with kpi_cols[1]:
+        surcharge = bill["climate_won"] + bill["fuel_won"]
+        metric_card("부과금", f"{surcharge:,}원",
+                    f"기후환경 {bill['climate_won']:,} + 연료비 {bill['fuel_won']:,}", "neutral")
+    with kpi_cols[2]:
+        if bill["welfare_discount"] > 0:
+            metric_card("복지할인", f"-{bill['welfare_discount']:,}원", welfare_type, "down")
+        else:
+            metric_card("복지할인", "해당 없음", None, "neutral")
+    with kpi_cols[3]:
+        eff_rate = bill["final_won"] / sim_kwh if sim_kwh > 0 else 0
+        metric_card("최종 청구금액", f"{bill['final_won']:,}원",
+                    f"실효단가 {eff_rate:.1f}원/kWh", "neutral")
+
     col1, col2 = st.columns(2)
 
+    # ── 왼쪽: 단계별 내역 ──
     with col1:
-        st.markdown('<div class="section-header">누진제 시뮬레이터 (주택용)</div>', unsafe_allow_html=True)
-        sim_kwh = st.slider("월 사용량 (kWh)", 50, 1000, 300, 10)
-        sim_month = st.selectbox("월", list(range(1, 13)), index=0, key="tariff_month")
-        bill = estimate_bill(sim_kwh, "주택용", sim_month)
-        metric_card("예상 요금", f"{bill['total_won']:,}원",
-                    f"누진 {bill['tier']}구간 · 실효단가 {bill['effective_rate']:.1f}원/kWh", "neutral")
-
-        st.markdown('<div class="section-header">누진 구간 경계 효과</div>', unsafe_allow_html=True)
-        kwh_range = list(range(50, 801, 10))
-        bills = [estimate_bill(k, "주택용", sim_month) for k in kwh_range]
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
-        ax1.plot(kwh_range, [b["total_won"] for b in bills], color=SPOTIFY_GREEN, linewidth=2.5)
-        ax1.axvline(sim_kwh, color=SPOTIFY_TEXT_SUB, linestyle="--", alpha=0.5)
-        ax1.set_ylabel("예상 요금 (원)")
-        ax2.plot(kwh_range, [b["effective_rate"] for b in bills], color=SPOTIFY_YELLOW, linewidth=2.5)
-        ax2.axvline(sim_kwh, color=SPOTIFY_TEXT_SUB, linestyle="--", alpha=0.5)
-        ax2.set_ylabel("실효단가 (원/kWh)")
-        ax2.set_xlabel("월 사용량 (kWh)")
-        tiers = [300, 450] if sim_month in (7, 8) else [200, 400]
-        for t in tiers:
-            ax1.axvline(t, color="#555", linestyle=":", alpha=0.4)
-            ax2.axvline(t, color="#555", linestyle=":", alpha=0.4)
-        plt.tight_layout()
-        st.pyplot(fig, use_container_width=True)
-        plt.close(fig)
-
-    with col2:
-        st.markdown('<div class="section-header">사용량 vs 요금 증가 비교</div>', unsafe_allow_html=True)
-        st.caption("사용량 증가가 요금에 미치는 증폭 효과")
-        base_kwh = st.number_input("기준 사용량 (kWh)", 100, 2000, 300, 50)
-        rows = []
-        for pct in [10, 20, 30, 40, 50]:
-            a = bill_increase_analysis(base_kwh * (1 + pct / 100), base_kwh, "주택용", sim_month)
-            rows.append({
-                "사용량 증가": f"+{pct}%",
-                "사용량": f"{a['pred_kwh']:,.0f} kWh",
-                "기준 요금": f"{a['prev_bill']:,}원",
-                "예측 요금": f"{a['pred_bill']:,}원",
-                "요금 증가": f"+{a['won_change_pct']:.1f}%",
-                "증폭률": f"{a['amplification']:.2f}x",
-            })
+        st.markdown('<div class="section-header">청구 내역 (단계별)</div>', unsafe_allow_html=True)
+        rows = [
+            {"단계": "① 기본요금", "금액": f"{bill['base_won']:,}원", "비고": f"{sim_ct}"},
+            {"단계": "② 전력량요금", "금액": f"{bill['energy_won']:,}원",
+             "비고": f"실효 {bill['effective_rate']:.1f}원/kWh" if bill.get("effective_rate") else ""},
+            {"단계": "③ 기후환경요금", "금액": f"{bill['climate_won']:,}원",
+             "비고": f"{climate_rate}원 × {sim_kwh:,}kWh"},
+            {"단계": "④ 연료비조정요금", "금액": f"{bill['fuel_won']:,}원",
+             "비고": f"{fuel_rate}원 × {sim_kwh:,}kWh"},
+        ]
+        if bill["welfare_discount"] > 0:
+            rows.append({"단계": "⑤ 복지할인", "금액": f"-{bill['welfare_discount']:,}원",
+                         "비고": welfare_type})
+        rows.extend([
+            {"단계": "소계", "금액": f"{bill['subtotal']:,}원", "비고": ""},
+            {"단계": "⑥ 부가가치세", "금액": f"{bill['vat']:,}원", "비고": "10%"},
+            {"단계": "⑦ 전력산업기반기금", "금액": f"{bill['fund']:,}원", "비고": "2.7%"},
+            {"단계": "최종 청구금액", "금액": f"{bill['final_won']:,}원", "비고": ""},
+        ])
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-        st.markdown('<div class="section-header">일반용 TOU 요금 구조</div>', unsafe_allow_html=True)
-        gen_kwh = st.number_input("월 사용량 (kWh)", 100, 50000, 1000, 100, key="gen_kwh")
-        peak_ratio = st.slider("최대부하 시간대 비율 (%)", 10, 70, 30, 5)
-        off_ratio = st.slider("경부하 시간대 비율 (%)", 10, 60, 30, 5)
-        mid_ratio = 100 - peak_ratio - off_ratio
-        if mid_ratio < 0:
-            st.warning("비율 합이 100%를 초과합니다")
-        else:
-            season = get_season(sim_month)
-            ratios = {"off_peak": off_ratio/100, "mid_peak": mid_ratio/100, "on_peak": peak_ratio/100}
-            gen_bill = estimate_bill(gen_kwh, "일반용", sim_month, tou_ratios=ratios)
-            metric_card("예상 전력량요금", f"{gen_bill['energy_won']:,}원",
-                        f"실효단가 {gen_bill['effective_rate']:.1f}원/kWh · {season}", "neutral")
+        # 사용량 증가에 따른 요금 변동
+        st.markdown('<div class="section-header">사용량 증가 → 요금 영향</div>', unsafe_allow_html=True)
+        inc_rows = []
+        for pct in [10, 20, 30, 50, 80]:
+            pred_kwh = sim_kwh * (1 + pct / 100)
+            b_pred = final_bill(pred_kwh, sim_ct, sim_month,
+                                max_demand_kw=sim_demand,
+                                climate_rate=climate_rate, fuel_rate=fuel_rate,
+                                welfare_type=welfare_type)
+            won_chg = (b_pred["final_won"] / bill["final_won"] - 1) * 100 if bill["final_won"] > 0 else 0
+            amp = won_chg / pct if pct > 0 else 0
+            inc_rows.append({
+                "증가": f"+{pct}%",
+                "사용량": f"{pred_kwh:,.0f}",
+                "청구금액": f"{b_pred['final_won']:,}원",
+                "차액": f"+{b_pred['final_won'] - bill['final_won']:,}원",
+                "요금증가": f"+{won_chg:.1f}%",
+                "증폭": f"{amp:.2f}x",
+            })
+        st.dataframe(pd.DataFrame(inc_rows), use_container_width=True, hide_index=True)
+
+    # ── 오른쪽: 계약종별 비교 ──
+    with col2:
+        st.markdown('<div class="section-header">계약종별 요금 비교</div>', unsafe_allow_html=True)
+        st.caption(f"{sim_kwh:,}kWh · {sim_month}월 기준, 동일 사용량 비교")
+
+        compare_contracts = [
+            "주택용", "주택용(고압)",
+            "일반용(갑)I", "일반용(갑)II",
+            "일반용(을)", "일반용(을)저압",
+            "일반용(을)고압A", "일반용(을)고압B",
+        ]
+        compare_rows = []
+        for ct in compare_contracts:
+            b = final_bill(sim_kwh, ct, sim_month,
+                           max_demand_kw=sim_demand,
+                           climate_rate=climate_rate, fuel_rate=fuel_rate,
+                           welfare_type=welfare_type)
+            diff = b["final_won"] - bill["final_won"]
+            diff_str = f"+{diff:,}" if diff > 0 else (f"{diff:,}" if diff < 0 else "기준")
+            is_current = (ct == sim_ct)
+            compare_rows.append({
+                "계약종별": f"▶ {ct}" if is_current else ct,
+                "전기요금": f"{b['elec_won']:,}",
+                "최종청구": f"{b['final_won']:,}",
+                "실효단가": f"{b['final_won']/sim_kwh:.1f}" if sim_kwh > 0 else "—",
+                "차액": diff_str,
+            })
+        st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+
+        # 복지 할인 비교 (주택용 선택 시)
+        if "주택" in sim_ct:
+            st.markdown('<div class="section-header">복지 할인별 비교</div>', unsafe_allow_html=True)
+            st.caption("동일 사용량, 할인 유형만 변경 시")
+            wf_rows = []
+            for wt, winfo in WELFARE_DISCOUNTS.items():
+                b = final_bill(sim_kwh, sim_ct, sim_month,
+                               climate_rate=climate_rate, fuel_rate=fuel_rate,
+                               welfare_type=wt)
+                wf_rows.append({
+                    "할인 유형": wt,
+                    "할인액": f"-{b['welfare_discount']:,}원" if b["welfare_discount"] > 0 else "—",
+                    "최종청구": f"{b['final_won']:,}원",
+                    "절감": f"-{bill['final_won'] - b['final_won']:,}원" if b['final_won'] < bill['final_won'] else "—",
+                })
+            st.dataframe(pd.DataFrame(wf_rows), use_container_width=True, hide_index=True)
 
 
 # ── 탭 4: 고객 리포트 ──
