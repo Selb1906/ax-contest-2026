@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>분석 결과 해석 가이드</title>
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; max-width: 900px; margin: 40px auto; line-height: 1.8; color: #1f2937; padding: 0 20px; }
+h1 { border-bottom: 3px solid #2563eb; padding-bottom: 8px; }
+h2 { color: #2563eb; margin-top: 2em; }
+h3 { color: #4b5563; margin-top: 1.5em; }
+code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+th { background: #f1f5f9; font-weight: 600; }
+.file { background: #f8fafc; border: 1px solid #e2e8f0; padding: 8px 14px; border-radius: 8px; margin: 8px 0; }
+.metric { display: inline-block; background: #eff6ff; border: 1px solid #bfdbfe; padding: 4px 10px; border-radius: 6px; margin: 2px; font-size: 0.9em; }
+.good { color: #16a34a; font-weight: 600; }
+.bad { color: #dc2626; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>분석 결과 해석 가이드</h1>
+<p>export/ 폴더에 수집된 결과 데이터를 해석하는 방법</p>
+
+<h2>1. 모델 성능 비교</h2>
+<div class="file">export/perf_모델_비교.csv</div>
+
+<h3>주요 지표</h3>
+<table>
+<tr><th>지표</th><th>의미</th><th>좋은 값</th><th>해석</th></tr>
+<tr><td><span class="metric">MAE (kWh)</span></td><td>평균 절대 오차</td><td>낮을수록</td><td>예측이 평균적으로 얼마나 빗나가는지 (kWh 단위)</td></tr>
+<tr><td><span class="metric">RMSE (kWh)</span></td><td>평균 제곱근 오차</td><td>낮을수록</td><td>큰 오차에 더 민감 (이상치 영향 반영)</td></tr>
+<tr><td><span class="metric">CVRMSE (%)</span></td><td>변동계수 RMSE</td><td>낮을수록</td><td>RMSE를 평균 사용량으로 나눈 값 (규모 무관 비교 가능)</td></tr>
+<tr><td><span class="metric">MAPE (%)</span></td><td>평균 절대 백분율 오차</td><td>낮을수록</td><td>사용량 대비 오차 비율 (고객 규모 무관)</td></tr>
+<tr><td><span class="metric">알림 F1</span></td><td>알림 탐지 정밀도+재현율</td><td>1에 가까울수록</td><td>과다발생 알림의 정확도 (0~1)</td></tr>
+</table>
+
+<h3>비교 방법</h3>
+<p>같은 <code>horizon_days</code>와 <code>contract_type</code>끼리 비교합니다.</p>
+<ul>
+<li><strong>제안 모델(lightgbm)</strong>이 모든 베이스라인보다 MAE/MAPE가 낮으면 성공</li>
+<li><strong>검침일+10</strong>이 +20보다 오차가 크면 정상 (관측 기간이 짧으니까)</li>
+<li><strong>알림 F1</strong>이 0.8 이상이면 실용적 수준</li>
+</ul>
+
+<h3>베이스라인 의미</h3>
+<table>
+<tr><th>모델</th><th>방식</th></tr>
+<tr><td>naive_last_month (전월 동일)</td><td>이번 달 = 지난 달</td></tr>
+<tr><td>seasonal_yoy (전년 동월)</td><td>이번 달 = 작년 같은 달</td></tr>
+<tr><td>moving_avg3 (3개월 이동평균)</td><td>이번 달 = 최근 3개월 평균</td></tr>
+<tr><td>partial_linear (부분 선형 보간)</td><td>관측 기간 사용량을 전체 월로 선형 확장</td></tr>
+<tr><td>partial_seasonal_yoy (부분 전년 동월)</td><td>관측분 + 잔여분은 전년 비율로</td></tr>
+</table>
+
+<h2>2. Ablation 분석</h2>
+<div class="file">export/perf_Ablation.csv</div>
+
+<h3>해석 방법</h3>
+<p>기본값(default) 대비 설정을 하나씩 바꿨을 때 MAPE가 어떻게 변하는지:</p>
+<ul>
+<li><strong>MAPE가 낮아지면</strong> → 해당 설정 변경이 <span class="good">개선</span></li>
+<li><strong>MAPE가 높아지면</strong> → 해당 설정 변경이 <span class="bad">악화</span></li>
+<li><strong>최적 조합(optimal_combined)</strong>: 각 축에서 최선인 것을 합친 결과</li>
+</ul>
+
+<h3>설정 축 설명</h3>
+<table>
+<tr><th>축</th><th>옵션</th><th>의미</th></tr>
+<tr><td>BTM</td><td>score / binary / exclude</td><td>자가발전 고객 처리: 점수로 / 이진 플래그로 / 제외</td></tr>
+<tr><td>기상</td><td>v1_paper / v2_power / ...</td><td>전국 대표기상 가중치: 인구수 / 전력판매량 / 균등 등</td></tr>
+<tr><td>기준온도</td><td>HDD base / CDD base</td><td>냉난방도일 기준온도 (15/24 등)</td></tr>
+<tr><td>피처선택</td><td>True / False</td><td>자동 피처 선택 적용 여부</td></tr>
+</table>
+
+<div class="file">export/perf_Ablation.csv 의 feature_group_contribution 부분</div>
+<p>피처 그룹별 기여도 (제거 실험):</p>
+<ul>
+<li><strong>기여도가 음수</strong> = 제거하면 성능 <span class="bad">악화</span> = 중요한 피처</li>
+<li>절대값이 클수록 해당 그룹이 예측에 기여하는 바가 큼</li>
+</ul>
+
+<h2>3. Sliding 상세 분석</h2>
+
+<h3>월별 오차</h3>
+<div class="file">export/sliding_error_by_month.csv</div>
+<p>어떤 월이 예측하기 어려운지 확인. 여름(냉방)/겨울(난방) 전환기에 오차가 크면 기상 피처의 기여를 의미.</p>
+
+<h3>검침일별 오차</h3>
+<div class="file">export/sliding_error_by_meter_day.csv</div>
+<p>검침일에 따라 성능 차이가 있는지. 검침일이 1일(월초)일 때 vs 15일(월중)일 때 MAPE 차이를 비교.</p>
+
+<h3>계약종별 오차</h3>
+<div class="file">export/sliding_error_by_contract.csv</div>
+<p>일반용 vs 주택용 예측 난이도 비교. 일반용은 주말/평일 패턴이 뚜렷해 예측이 쉬울 수 있음.</p>
+
+<h3>검침일+10 vs +20</h3>
+<div class="file">export/sliding_error_by_horizon.csv</div>
+<p>+20일(관측 2/3)이 +10일(관측 1/3)보다 얼마나 정확한지. 차이가 크면 관측 기간 정보가 중요하다는 의미.</p>
+
+<h3>특수일 영향</h3>
+<div class="file">export/sliding_error_by_special.csv</div>
+<p>공휴일/연휴가 포함된 월이 예측하기 어려운지. disruption_ratio 피처의 유효성 확인.</p>
+
+<h3>최악/최선 조건</h3>
+<div class="file">export/sliding_worst_dates.csv / sliding_best_dates.csv</div>
+<p>오차가 가장 큰/작은 (연월, 검침일) 조합. 특정 시기에 모델이 실패하는 패턴을 찾는 데 활용.</p>
+
+<h2>4. SHAP 피처 중요도</h2>
+<div class="file">export/shap/</div>
+
+<h3>이미지 해석</h3>
+<table>
+<tr><th>파일</th><th>보는 법</th></tr>
+<tr><td>shap_summary.png</td><td>세로축: 피처 (위가 중요), 가로축: SHAP 값 (양수=예측 증가, 음수=감소), 점 색: 피처값 크기 (빨강=높음, 파랑=낮음)</td></tr>
+<tr><td>shap_dep_*.png</td><td>가로축: 해당 피처값, 세로축: SHAP 값. 피처와 예측의 비선형 관계를 보여줌</td></tr>
+<tr><td>correlation_heatmap.png</td><td>피처 간 상관계수. 짙은 빨강/파랑 = 강한 상관 (다중공선성 주의)</td></tr>
+</table>
+
+<h3>수치 데이터</h3>
+<div class="file">export/shap/shap_global.csv</div>
+<p>피처별 평균 |SHAP| 값. 숫자가 클수록 모델에 미치는 영향이 큼.</p>
+
+<h2>5. 잔차 보정</h2>
+<div class="file">export/perf_잔차_보정.csv + export/residual_correction.json</div>
+
+<p>2-Stage Ridge 잔차 보정의 효과:</p>
+<ul>
+<li><strong>보정 후 MAPE가 낮아졌으면</strong> → 잔차 보정 채택</li>
+<li><strong>높아졌으면</strong> → 데이터 기간 부족으로 미채택 (보고서에 근거로 기술)</li>
+</ul>
+
+<p><code>residual_correction.json</code>의 <code>pattern_analysis</code>에서:</p>
+<ul>
+<li><strong>by_month</strong>: 월별 평균 잔차 → "7월에 모델이 과소 예측" 같은 패턴</li>
+<li><strong>by_horizon</strong>: +10일/+20일별 잔차 → horizon에 따른 체계적 편향</li>
+<li><strong>ridge_coefficients</strong>: 어떤 피처가 잔차를 설명하는지 (절대값 큰 순)</li>
+</ul>
+
+<h2>6. 논문용 이미지</h2>
+<div class="file">export/figures/</div>
+
+<table>
+<tr><th>파일</th><th>논문 섹션</th><th>설명</th></tr>
+<tr><td>fig01_model_comparison.png</td><td>실험 결과</td><td>모델별 MAE/MAPE 비교 막대 차트</td></tr>
+<tr><td>fig02_pred_vs_actual.png</td><td>실험 결과</td><td>예측-실측 산점도 + R^2 (대각선에 가까울수록 좋음)</td></tr>
+<tr><td>fig03_residual_distribution.png</td><td>실험 결과</td><td>잔차 분포 (0 중심 정규분포에 가까울수록 좋음)</td></tr>
+<tr><td>fig04_monthly_error_boxplot.png</td><td>분석</td><td>월별 오차 분포 (계절 패턴 확인)</td></tr>
+<tr><td>fig05_ablation_waterfall.png</td><td>분석</td><td>피처 그룹 기여도 시각화</td></tr>
+<tr><td>fig06_learning_curve.png</td><td>모델 설계</td><td>학습 곡선 (과적합 진단)</td></tr>
+<tr><td>fig07_precision_recall.png</td><td>알림 성능</td><td>모델별 정밀도-재현율 (우상단이 최적)</td></tr>
+<tr><td>fig08_weather_response.png</td><td>EDA</td><td>기상(HDD/CDD) vs 사용량 관계</td></tr>
+<tr><td>fig09_load_profile_by_contract.png</td><td>EDA</td><td>계약종별 시간대 부하 패턴</td></tr>
+<tr><td>fig10_mape_heatmap.png</td><td>분석</td><td>연월 x 검침일 오차 히트맵</td></tr>
+</table>
+
+<h2>7. 대시보드</h2>
+<div class="file">export/dashboard_safe.html</div>
+<p>브라우저에서 열면 인터랙티브 대시보드. 고객 데이터가 제거된 반출 안전 버전.</p>
+<ul>
+<li><strong>모델 성능</strong> 탭: 검침일/계약종 필터로 지표 비교</li>
+<li><strong>요금 분석</strong> 탭: 계약종별 요금 시뮬레이터 (역률/복지할인 포함)</li>
+<li><strong>모델 상세</strong> 탭: SHAP + Ablation + 잔차 보정</li>
+</ul>
+
+<h2>8. 보고서 작성 시 활용 팁</h2>
+<ul>
+<li><strong>정확도</strong>: perf_모델_비교.csv에서 제안 모델의 MAE/CVRMSE를 베이스라인과 비교</li>
+<li><strong>알림 성능</strong>: F1, Precision, Recall로 과다발생 탐지 정확도 보고</li>
+<li><strong>피처 분석</strong>: SHAP summary로 "어떤 정보가 예측에 중요한가" 설명</li>
+<li><strong>스케일 아웃</strong>: sliding_error_by_meter_day.csv로 "검침일에 무관하게 안정적" 입증</li>
+<li><strong>요금 영향</strong>: 대시보드 요금 탭 스크린샷으로 실사용 시나리오 제시</li>
+</ul>
+
+</body>
+</html>

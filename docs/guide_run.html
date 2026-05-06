@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>분석 실행 가이드</title>
+<style>
+body { font-family: 'Malgun Gothic', sans-serif; max-width: 900px; margin: 40px auto; line-height: 1.8; color: #1f2937; padding: 0 20px; }
+h1 { border-bottom: 3px solid #2563eb; padding-bottom: 8px; }
+h2 { color: #2563eb; margin-top: 2em; }
+code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
+pre code { background: none; color: inherit; padding: 0; }
+.step { background: #f8fafc; border-left: 4px solid #2563eb; padding: 12px 16px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+.step-num { display: inline-block; background: #2563eb; color: white; width: 28px; height: 28px; text-align: center; border-radius: 50%; font-weight: 700; margin-right: 8px; line-height: 28px; }
+.warn { background: #fef2f2; border-left-color: #dc2626; }
+.tip { background: #f0fdf4; border-left-color: #16a34a; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+th { background: #f1f5f9; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>분석 실행 가이드</h1>
+<p>전기요금 과다발생 사전 예측모델 -- 안심구역 분석 절차</p>
+
+<h2>1. 환경 검증</h2>
+<div class="step">
+<span class="step-num">1</span> 패키지가 모두 설치되었는지 확인
+</div>
+<pre><code>python -m scripts.verify_env</code></pre>
+<p>모든 항목에 통과 표시가 나오면 다음으로. 실패 항목이 있으면 직원에게 해당 패키지 설치 요청.</p>
+
+<h2>2. LP 데이터 찾기</h2>
+<div class="step">
+<span class="step-num">2</span> 데이터 경로를 모를 때 자동 탐색
+</div>
+<pre><code>python -m scripts.inspect_lp --scan
+python -m scripts.inspect_lp --scan --root D:/</code></pre>
+<p>후보 목록이 나오면 해당 경로로 구조 탐색:</p>
+<pre><code>python -m scripts.inspect_lp --path /찾은/경로/</code></pre>
+<p>이 명령은 <code>configs/source_dsz.yaml</code>을 자동 생성합니다. 컬럼 매핑을 확인하고 필요시 수정.</p>
+
+<h2>3. 전체 파이프라인 실행</h2>
+<div class="step">
+<span class="step-num">3</span> 메인 분석 (학습 + 평가 + SHAP + Ablation 등)
+</div>
+<pre><code>python -m scripts.run_full_analysis --source configs/source_dsz.yaml</code></pre>
+
+<p>자동으로 실행되는 단계:</p>
+<table>
+<tr><th>Step</th><th>내용</th><th>산출물</th></tr>
+<tr><td>1</td><td>데이터 로딩</td><td>-</td></tr>
+<tr><td>1.5</td><td>전처리 (결측/이상값)</td><td>preprocess_log/</td></tr>
+<tr><td>2</td><td>BTM(자가발전) 탐지</td><td>btm_results/</td></tr>
+<tr><td>3</td><td>프로파일러</td><td>profile_stats/</td></tr>
+<tr><td>4</td><td>베이스라인 5종 평가</td><td>eval_results/baselines.*</td></tr>
+<tr><td>4.5</td><td>데이터 분할 + 누수 체크</td><td>-</td></tr>
+<tr><td>5</td><td>LightGBM 학습</td><td>weights/, eval_results/metrics.*</td></tr>
+<tr><td>5.5</td><td>Sliding 상세 평가</td><td>sliding_results/</td></tr>
+<tr><td>6</td><td>SHAP 피처 중요도</td><td>explain_results/</td></tr>
+<tr><td>7~8</td><td>기상 최적화</td><td>weather_opt/</td></tr>
+<tr><td>10~11</td><td>Ablation (BTM/기상/피처)</td><td>ablation_results/</td></tr>
+<tr><td>11.5</td><td>잔차 보정</td><td>residual_correction/</td></tr>
+</table>
+
+<div class="tip step">
+<strong>중단 후 재개:</strong> <code>--resume</code> 플래그를 추가하면 체크포인트에서 이어서 실행
+</div>
+<div class="tip step">
+<strong>시간 절약:</strong> <code>--skip-shap</code>, <code>--skip-profile</code> 옵션으로 선택적 스킵 가능
+</div>
+
+<h2>4. 대시보드 생성</h2>
+<div class="step">
+<span class="step-num">4</span> 대시보드용 데이터 + HTML 생성
+</div>
+<pre><code>python -m scripts.prepare_ui_data --source configs/source_dsz.yaml --meter-day 1
+python -m scripts.generate_dashboard</code></pre>
+<p>브라우저에서 <code>dashboard.html</code>을 열면 분석 결과를 탭별로 확인할 수 있습니다.</p>
+
+<h2>5. 논문용 이미지</h2>
+<div class="step">
+<span class="step-num">5</span> 10종 시각화 자동 생성
+</div>
+<pre><code>python -m scripts.generate_figures</code></pre>
+<p>결과: <code>figures/</code> 디렉토리에 300dpi PNG</p>
+
+<h2>6. 반출 파일 수집</h2>
+<div class="step">
+<span class="step-num">6</span> 반출 안전 파일을 export/ 한 폴더에 모음
+</div>
+<pre><code>python -m scripts.export_summary --dashboard</code></pre>
+<p><code>export/</code> 폴더만 반출 신청하면 됩니다.</p>
+
+<div class="warn step">
+<strong>반출 불가 파일:</strong> customer_id가 포함된 파일 (data/ui/, checkpoints/lgbm_preds.*, btm_flags.*, sliding_raw.*)은 반출할 수 없습니다. <code>export/</code>에는 집계 데이터만 포함됩니다.
+</div>
+
+<h2>한 줄 요약 (전체 순서)</h2>
+<pre><code>python -m scripts.verify_env
+python -m scripts.inspect_lp --scan
+python -m scripts.inspect_lp --path /data/lp/
+python -m scripts.run_full_analysis --source configs/source_dsz.yaml
+python -m scripts.prepare_ui_data --source configs/source_dsz.yaml
+python -m scripts.generate_dashboard
+python -m scripts.generate_figures
+python -m scripts.export_summary --dashboard</code></pre>
+
+</body>
+</html>
