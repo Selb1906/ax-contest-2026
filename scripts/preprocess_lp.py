@@ -140,8 +140,10 @@ def parse_timestamps(chunk: pd.DataFrame) -> pd.DataFrame:
         time_str_fixed = time_str.where(~is_2400, "0000")
         combined = date_str + " " + time_str_fixed.str[:2] + ":" + time_str_fixed.str[2:]
 
-    dt = pd.to_datetime(combined, errors="coerce")
-    # 실패 시 다른 포맷 시도
+    # 포맷 명시로 빠르게 파싱 (추론 방지)
+    dt = pd.to_datetime(combined, errors="coerce", format="%Y-%m-%d %H:%M")
+    if dt.isna().sum() > len(dt) * 0.5:
+        # 다른 포맷 시도
     if dt.isna().all():
         dt = pd.to_datetime(combined, errors="coerce", format="mixed")
     # 그래도 object면 강제 변환
