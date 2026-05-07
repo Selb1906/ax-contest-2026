@@ -82,7 +82,9 @@ def _load_synth(cfg: SourceConfig) -> pd.DataFrame:
             if (i + 1) % 50 == 0 or i == len(parts) - 1:
                 rows_so_far = sum(len(f) for f in frames)
                 print(f"    {i+1}/{len(parts)} 파트 ({rows_so_far:,}행, {_time.time()-t0:.1f}초)", flush=True)
+        print(f"    합치는 중...", end=" ", flush=True)
         df = pd.concat(frames, ignore_index=True)
+        print(f"{len(df):,}행 ({_time.time()-t0:.1f}초)", flush=True)
     else:
         print(f"  [synth] parquet 파일 로딩...", end=" ", flush=True)
         df = pd.read_parquet(p, engine="pyarrow")
@@ -313,19 +315,18 @@ def load(cfg: SourceConfig, *, validate: bool = True) -> pd.DataFrame:
     df = schemas.ensure_columns(
         df, [P_REACTIVE_KWH, P_APPARENT_KWH, MAX_DEMAND_KW]
     )
-    # 계약종별 정규화 (다양한 표기 → 표준 형태)
+    # 계약종별 정규화 (유니크 값만 변환 → 벡터 매핑)
     if CONTRACT_TYPE in df.columns:
+        print(f"  [계약종별 정규화]...", end=" ", flush=True)
         raw_types = df[CONTRACT_TYPE].dropna().unique()
-        df[CONTRACT_TYPE] = df[CONTRACT_TYPE].map(
-            lambda x: normalize_contract_type(x) if isinstance(x, str) else x
-        )
+        norm_map = {v: normalize_contract_type(v) for v in raw_types if isinstance(v, str)}
+        df[CONTRACT_TYPE] = df[CONTRACT_TYPE].map(lambda x: norm_map.get(x, x))
         new_types = df[CONTRACT_TYPE].dropna().unique()
-        changed = set(raw_types) - set(new_types)
-        if changed:
-            print(f"  [계약종별 정규화] {len(raw_types)}종 → {len(new_types)}종")
-        print(f"  계약종별: {sorted(new_types)}")
+        print(f"{sorted(new_types)}", flush=True)
+    print(f"  [검증 중]...", end=" ", flush=True)
     if validate:
         schemas.validate(df, strict=False)
+    print(f"OK", flush=True)
     return df
 
 
