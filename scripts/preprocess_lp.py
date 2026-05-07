@@ -125,14 +125,20 @@ def parse_timestamps(chunk: pd.DataFrame) -> pd.DataFrame:
     검침시분 "2400" → 다음날 00:00 보정.
     """
     date_str = chunk["ts_date"].astype(str).str.strip()
-    time_str = chunk["ts_time"].astype(str).str.strip().str.zfill(4)
+    time_str = chunk["ts_time"].astype(str).str.strip()
 
-    # 2400 → 0000, 다음날 보정 플래그
-    is_2400 = time_str == "2400"
-    time_str_fixed = time_str.where(~is_2400, "0000")
+    # 형식 자동 감지: "0:00" (H:MM) vs "0000" (HHMM)
+    if time_str.str.contains(":").any():
+        is_2400 = time_str.isin(["24:00", "2400"])
+        time_str_fixed = time_str.replace("24:00", "00:00")
+        combined = date_str + " " + time_str_fixed
+    else:
+        time_str = time_str.str.zfill(4)
+        is_2400 = time_str == "2400"
+        time_str_fixed = time_str.where(~is_2400, "0000")
+        combined = date_str + " " + time_str_fixed.str[:2] + ":" + time_str_fixed.str[2:]
 
-    combined = date_str + " " + time_str_fixed.str[:2] + ":" + time_str_fixed.str[2:]
-    dt = pd.to_datetime(combined, errors="coerce")
+    dt = pd.to_datetime(combined, errors="coerce", format="mixed")
 
     # 2400이었던 행 → +1일
     if is_2400.any():
