@@ -138,15 +138,26 @@ def parse_timestamps(chunk: pd.DataFrame) -> pd.DataFrame:
         time_str_fixed = time_str.where(~is_2400, "0000")
         combined = date_str + " " + time_str_fixed.str[:2] + ":" + time_str_fixed.str[2:]
 
-    dt = pd.to_datetime(combined, errors="coerce", format="mixed")
+    dt = pd.to_datetime(combined, errors="coerce")
+    # 실패 시 다른 포맷 시도
+    if dt.isna().all():
+        dt = pd.to_datetime(combined, errors="coerce", format="mixed")
+    # 그래도 object면 강제 변환
+    if not hasattr(dt.dtype, 'tz') and dt.dtype == object:
+        dt = pd.to_datetime(dt, errors="coerce")
 
     # 2400이었던 행 → +1일
     if is_2400.any():
         dt = dt.copy()
         dt.loc[is_2400] = dt.loc[is_2400] + pd.Timedelta(days=1)
 
+    # NaT 행 제거
+    nat_count = dt.isna().sum()
+    if nat_count > 0:
+        print(f"    ts 파싱 실패 {nat_count}건 제거", flush=True)
+
     chunk["_dt"] = dt
-    chunk["hour"] = dt.dt.hour
+    chunk["hour"] = dt.dt.hour.fillna(0).astype(int)
     chunk["date"] = dt.dt.normalize()
     chunk["year_month"] = dt.dt.to_period("M").astype(str)
     chunk["dayofweek"] = dt.dt.dayofweek  # 0=월, 6=일
