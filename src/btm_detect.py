@@ -68,24 +68,17 @@ def _load_asos_solar(asos_dir: str = "ASOS") -> pd.Series | None:
         asos = read_asos_directory(str(p))
         if "solar_mj" not in asos.columns:
             return None
-        # 가중평균 일사량
         asos["datetime_h"] = asos["ts"].dt.floor("h")
-        weighted = []
         w_total = sum(EIGHT_CITY_WEIGHTS.values())
-        for dt, grp in asos.groupby("datetime_h"):
-            solar_w = 0.0
-            w_sum = 0.0
-            for _, row in grp.iterrows():
-                w = EIGHT_CITY_WEIGHTS.get(row["station_id"], 0) / w_total
-                if pd.notna(row["solar_mj"]):
-                    solar_w += row["solar_mj"] * w
-                    w_sum += w
-            if w_sum > 0:
-                weighted.append({"datetime_h": dt, "solar_mj": solar_w / w_sum})
-        if not weighted:
+        asos["_w"] = asos["station_id"].map(EIGHT_CITY_WEIGHTS).fillna(0) / w_total
+        asos = asos[asos["solar_mj"].notna() & (asos["_w"] > 0)].copy()
+        asos["_weighted"] = asos["solar_mj"] * asos["_w"]
+        g = asos.groupby("datetime_h").agg(solar_sum=("_weighted", "sum"), w_sum=("_w", "sum"))
+        g = g[g["w_sum"] > 0]
+        g["solar_mj"] = g["solar_sum"] / g["w_sum"]
+        if g.empty:
             return None
-        wdf = pd.DataFrame(weighted)
-        return wdf.set_index("datetime_h")["solar_mj"]
+        return g["solar_mj"]
     except Exception:
         return None
 
