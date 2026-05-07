@@ -160,28 +160,31 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
         elif sp.suffix.lower() in (".xlsx", ".xls"):
             d = pd.read_excel(sp)
         else:
-            # 안심구역 CSV 인코딩 자동 감지
-            # fix_csv.py로 정리된 clean.csv는 encoding 지정 없이 읽힘
+            # 구분자 자동 감지 (쉼표/탭)
+            with open(sp, "r", encoding="utf-8-sig", errors="replace") as _f:
+                first_line = _f.readline()
+            sep = "\t" if "\t" in first_line else ","
+
+            # 인코딩 자동 감지
             d = None
             for enc in ["utf-8-sig", "utf-8", "cp949", "euc-kr"]:
                 try:
-                    d = pd.read_csv(sp, encoding=enc, on_bad_lines="skip")
-                    print(f"  [인코딩] {sp.name}: {enc}")
+                    d = pd.read_csv(sp, encoding=enc, sep=sep, on_bad_lines="skip")
+                    print(f"  [인코딩] {sp.name}: {enc}, 구분자: {'탭' if sep == chr(9) else '쉼표'}")
                     break
                 except (UnicodeDecodeError, UnicodeError):
                     continue
                 except Exception:
-                    # C 엔진 tokenize 에러 등
                     try:
-                        d = pd.read_csv(sp, encoding=enc, on_bad_lines="skip",
-                                        engine="python")
+                        d = pd.read_csv(sp, encoding=enc, sep=sep,
+                                        on_bad_lines="skip", engine="python")
                         print(f"  [인코딩] {sp.name}: {enc} (python engine)")
                         break
                     except Exception:
                         continue
             if d is None:
                 d = pd.read_csv(sp, encoding="utf-8", errors="replace",
-                                on_bad_lines="skip")
+                                sep=sep, on_bad_lines="skip")
                 print(f"  [인코딩] {sp.name}: utf-8 (깨진 문자 대체)")
         d = d.rename(columns=reverse_map)
 
