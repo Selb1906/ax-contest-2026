@@ -160,11 +160,29 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
         elif sp.suffix.lower() in (".xlsx", ".xls"):
             d = pd.read_excel(sp)
         else:
-            # 안심구역 CSV 는 cp949 가능성 — 둘 다 시도
-            try:
-                d = pd.read_csv(sp, encoding="utf-8-sig")
-            except UnicodeDecodeError:
-                d = pd.read_csv(sp, encoding="cp949")
+            # 안심구역 CSV 인코딩 자동 감지
+            # fix_csv.py로 정리된 clean.csv는 encoding 지정 없이 읽힘
+            d = None
+            for enc in ["utf-8-sig", "utf-8", "cp949", "euc-kr"]:
+                try:
+                    d = pd.read_csv(sp, encoding=enc, on_bad_lines="skip")
+                    print(f"  [인코딩] {sp.name}: {enc}")
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+                except Exception:
+                    # C 엔진 tokenize 에러 등
+                    try:
+                        d = pd.read_csv(sp, encoding=enc, on_bad_lines="skip",
+                                        engine="python")
+                        print(f"  [인코딩] {sp.name}: {enc} (python engine)")
+                        break
+                    except Exception:
+                        continue
+            if d is None:
+                d = pd.read_csv(sp, encoding="utf-8", errors="replace",
+                                on_bad_lines="skip")
+                print(f"  [인코딩] {sp.name}: utf-8 (깨진 문자 대체)")
         d = d.rename(columns=reverse_map)
 
         # 날짜+시간 분리 컬럼 처리 (검침년월일 + 검침시분 → ts)
