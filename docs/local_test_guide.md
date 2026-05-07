@@ -29,7 +29,7 @@ pip install shap
 ```bash
 python -m scripts.verify_env
 ```
-shap 외 전부 통과하면 OK. shap은 설치 안 해도 `--skip-shap`으로 진행 가능.
+전부 통과해야 합니다. shap이 없으면 `pip install shap`으로 설치.
 
 ## 3. 합성 데이터 생성
 ```bash
