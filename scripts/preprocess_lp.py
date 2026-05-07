@@ -388,8 +388,14 @@ def run(csv_path: str, outdir: str) -> dict:
     else:
         encoding = enc_result
 
+    # ── 구분자 자동 감지 ──
+    with open(actual_path, "r", encoding=encoding, errors="replace") as _f:
+        first_line = _f.readline()
+    sep = "\t" if "\t" in first_line else ","
+    print(f"[구분자] {'탭' if sep == chr(9) else '쉼표'}")
+
     # ── 원본 컬럼 확인 ──
-    test_df = pd.read_csv(actual_path, encoding=encoding, nrows=3, on_bad_lines="skip")
+    test_df = pd.read_csv(actual_path, encoding=encoding, sep=sep, nrows=3, on_bad_lines="skip")
     raw_cols = set(test_df.columns)
     missing_required = REQUIRED_RAW_COLS - raw_cols
     if missing_required:
@@ -417,9 +423,10 @@ def run(csv_path: str, outdir: str) -> dict:
     reader = pd.read_csv(
         actual_path,
         encoding=encoding,
+        sep=sep,
         on_bad_lines="skip",
         chunksize=CHUNK_SIZE,
-        dtype=str,  # 문자열로 읽고 아래에서 변환 (타입 충돌 방지)
+        dtype=str,
     )
 
     print(f"\n{'='*60}")
