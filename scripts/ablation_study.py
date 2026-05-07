@@ -102,10 +102,14 @@ SLIDING_METER_DAYS = list(range(1, 29))  # run_full_analysis에서 재정의 가
 
 def run_single_experiment(df, config, train_end):
     """단일 설정으로 LightGBM 학습 + Sliding 평가."""
+    import time as _time
+    _t0 = _time.time()
     from src.models.lgbm import build_features, train
     from src.eval import regression_metrics
 
+    print(f"    [{config.name}] 피처 생성...", end=" ", flush=True)
     features, spec = build_features(df)
+    print(f"학습...", end=" ", flush=True)
 
     # 기상 피처 조인
     features = attach_weather(features, config)
@@ -154,6 +158,7 @@ def run_single_experiment(df, config, train_end):
     if len(test_features) == 0:
         return None
 
+    print(f"sliding 평가...", end=" ", flush=True)
     # Sliding: 검침일별 × horizon별 분리 수집
     records_10 = []  # (y_true, y_pred) for +10일
     records_20 = []  # (y_true, y_pred) for +20일
@@ -182,7 +187,9 @@ def run_single_experiment(df, config, train_end):
         except Exception:
             pass
 
+    _elapsed = _time.time() - _t0
     if not records_10 and not records_20:
+        print(f"데이터 부족 ({_elapsed:.0f}초)", flush=True)
         return None
 
     def _metrics(pairs):
@@ -196,6 +203,7 @@ def run_single_experiment(df, config, train_end):
     reg_20 = _metrics(records_20)
     reg_all = _metrics(records_10 + records_20)
 
+    print(f"완료 ({_elapsed:.0f}초)", flush=True)
     return {
         "name": config.name,
         "config": config.describe(),
