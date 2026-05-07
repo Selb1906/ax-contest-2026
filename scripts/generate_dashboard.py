@@ -613,6 +613,9 @@ body {
     </div>
   </div>
 
+  <div class="alert alert-secondary py-1 px-3 mb-2" style="font-size:0.82rem; opacity:0.8;">
+    ※ 검침일 1일 기준 계산 (검침일에 따른 계절 혼합 미적용 — 향후 개선 예정)
+  </div>
   <!-- Tariff KPI -->
   <div class="row g-3 mb-3" id="tariff-kpis"></div>
 
@@ -753,7 +756,7 @@ const TARIFF = (function() {
     return "winter";
   }
 
-  function progressiveBill(kwh, tiers) {
+  function progressiveBill(kwh, tiers, month, ctKey) {
     let remaining = kwh, energy = 0, base = 0, tierIdx = 0, prevUpper = 0;
     for (let i = 0; i < tiers.length; i++) {
       const t = tiers[i];
@@ -764,9 +767,19 @@ const TARIFF = (function() {
       prevUpper = t.upper;
       if (remaining <= 0) break;
     }
+    // 슈퍼유저: 하계(7,8) 또는 동계(12,1,2)에 1000kWh 초과 시 추가 단가
+    let superExtra = 0;
+    const isSuperSeason = [7, 8, 12, 1, 2].includes(month);
+    if (isSuperSeason && kwh > 1000) {
+      const superRate = (ctKey === "res_high") ? 601.3 : 736.2;
+      const lastTierRate = tiers[tiers.length - 1].rate;
+      superExtra = (kwh - 1000) * (superRate - lastTierRate);
+      energy += superExtra;
+    }
     const total = base + energy;
     return {base_won: base, energy_won: Math.round(energy), elec_won: Math.round(total),
-            effective_rate: kwh > 0 ? +(total/kwh).toFixed(1) : 0, tier: tierIdx, tariff_type: "progressive"};
+            effective_rate: kwh > 0 ? +(total/kwh).toFixed(1) : 0, tier: tierIdx, tariff_type: "progressive",
+            super_user_extra: Math.round(superExtra)};
   }
 
   function seasonalFlatBill(kwh, rates, season, demandKw) {
@@ -792,8 +805,8 @@ const TARIFF = (function() {
     const season = getSeason(month);
     const summerFlag = (month === 7 || month === 8) ? "summer" : "normal";
 
-    if (ctKey === "res_low")  return progressiveBill(kwh, RES_LOW[summerFlag]);
-    if (ctKey === "res_high") return progressiveBill(kwh, RES_HIGH[summerFlag]);
+    if (ctKey === "res_low")  return progressiveBill(kwh, RES_LOW[summerFlag], month, ctKey);
+    if (ctKey === "res_high") return progressiveBill(kwh, RES_HIGH[summerFlag], month, ctKey);
 
     // 일반용(갑)I
     if (ctKey.startsWith("gap_i_")) {

@@ -31,6 +31,8 @@ def main() -> int:
     parser.add_argument("--weights", default="weights/dsz_lgbm/")
     parser.add_argument("--chunk-size", type=int, default=500)
     parser.add_argument("--output", default="predictions/")
+    parser.add_argument("--meter-day", type=int, default=1,
+                        help="검침일 (1~28, 기본: 1 = 캘린더 월)")
     args = parser.parse_args()
 
     t0 = time.time()
@@ -68,12 +70,12 @@ def main() -> int:
     )
 
     # 5. 요금 환산
-    print("[billing]")
+    print(f"[billing] meter_day={args.meter_day}", flush=True)
     bills = []
     for _, row in alarm_merged.iterrows():
         ct = row.get("contract_type", "일반용")
         month = row["year_month"].month if hasattr(row["year_month"], "month") else 1
-        bill = estimate_bill(row["pred_monthly_kwh"], ct, month)
+        bill = estimate_bill(row["pred_monthly_kwh"], ct, month, meter_day=args.meter_day)
         bills.append(bill["total_won"])
     alarm_merged["pred_bill_won"] = bills
 

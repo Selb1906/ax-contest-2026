@@ -139,8 +139,16 @@ def _weather_aggs(
     return obs_rem.merge(full, on=[CUSTOMER_ID, "year_month"], how="left")
 
 
-def _ami_features(df: pd.DataFrame, horizon_tbl: pd.DataFrame) -> pd.DataFrame:
+def _ami_features(df: pd.DataFrame, horizon_tbl: pd.DataFrame) -> pd.DataFrame | None:
     """관측 기간의 15분 AMI 패턴에서 피처 산출 — AMI 데이터 고유 가치."""
+    # 일별 집계 데이터 감지 (15분이면 하루 96행, 일별이면 1행)
+    sample_cust = df[CUSTOMER_ID].iloc[0]
+    sample_date = pd.to_datetime(df[TS]).dt.date.iloc[0]
+    n_per_day = len(df[(df[CUSTOMER_ID] == sample_cust) & (pd.to_datetime(df[TS]).dt.date == sample_date)])
+    if n_per_day <= 1:
+        print("  [AMI] 일별 데이터 감지 → AMI 피처 산출 불가, 스킵", flush=True)
+        return None  # 일별 데이터 → AMI 피처 산출 불가
+
     cols = [CUSTOMER_ID, TS, P_ACTIVE_KWH]
     if P_REACTIVE_KWH in df.columns:
         cols.append(P_REACTIVE_KWH)
@@ -174,11 +182,18 @@ def _ami_features(df: pd.DataFrame, horizon_tbl: pd.DataFrame) -> pd.DataFrame:
             peak_ratio = vals[peak_mask.values].sum() / total
             night_ratio = vals[night_mask.values].sum() / total
 
-            # TOU on_peak (계절별)
+            # TOU on_peak (계절별) + 토/공휴일 재분류
             from ..tou import get_season, classify_tou
             month_num = ym.month
             season = get_season(month_num)
             tou_labels = np.array([classify_tou(h_, season) for h_ in grp["hour"]])
+            # 토요일(5): on_peak → mid_peak
+            dow = grp["dayofweek"].values
+            sat_mask = (dow == 5) & (tou_labels == "on_peak")
+            tou_labels[sat_mask] = "mid_peak"
+            # 일요일(6): 전부 → off_peak
+            sun_mask = dow == 6
+            tou_labels[sun_mask] = "off_peak"
             on_peak_sum = vals[tou_labels == "on_peak"].sum()
             tou_on_peak = on_peak_sum / total
 

@@ -1,0 +1,67 @@
+calendar:
+  holidays_path: null
+general:
+  base_kwh_per_15min:
+    dist: lognormal
+    mu: -0.5
+    sigma: 0.8
+  daily_peaks:
+  - hour: 14
+    multiplier: 2.0
+  holiday_multiplier: 0.5
+  night_trough:
+    hour: 2
+    multiplier: 0.2
+  noise_sigma: 0.25
+  weather:
+    cdd_base: 24.0
+    cdd_coef: 0.06
+    hdd_base: 12.0
+    hdd_coef: 0.012
+  weekend_multiplier: 0.5
+generator:
+  end_date: '2024-12-31'
+  interval_min: 15
+  n_customers: 100
+  output:
+    partition_by:
+    - customer_id
+    path: data/synth/lp_1gb.parquet
+  residential_ratio: 0.1428
+  seed: 42
+  start_date: '2022-01-01'
+max_demand:
+  multiplier_max: 1.5
+  multiplier_min: 1.1
+power_factor:
+  mean: 0.92
+  min: 0.7
+  std: 0.03
+residential:
+  base_kwh_per_15min:
+    dist: lognormal
+    mu: -2.6
+    sigma: 0.4
+  daily_peaks:
+  - hour: 8
+    multiplier: 1.4
+  - hour: 20
+    multiplier: 1.8
+  holiday_multiplier: 1.1
+  night_trough:
+    hour: 3
+    multiplier: 0.5
+  noise_sigma: 0.15
+  weather:
+    cdd_base: 24.0
+    cdd_coef: 0.045
+    hdd_base: 15.0
+    hdd_coef: 0.025
+  weekend_multiplier: 1.1
+schema_version: 1
+weather:
+  amplitude_annual: 25.0
+  daily_amplitude: 8.0
+  mean_annual: 12.5
+  noise_sigma: 2.0
+  source: synthetic

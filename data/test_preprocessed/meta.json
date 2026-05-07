@@ -1,0 +1,54 @@
+{
+  "input_file": "data/synth/test_lp.csv",
+  "encoding": "utf-8-sig",
+  "total_rows_read": 1728100,
+  "bad_rows_skipped": "0",
+  "chunk_size": 1000000,
+  "n_chunks": 2,
+  "elapsed_seconds": 53.0,
+  "rows_per_second": 32595,
+  "outputs": {
+    "daily": {
+      "rows": 18100,
+      "columns": [
+        "customer_id",
+        "date",
+        "contract_type",
+        "day_kwh",
+        "day_reactive_kwh",
+        "day_apparent_kwh",
+        "n_intervals",
+        "ts",
+        "p_active_kwh",
+        "p_reactive_kwh"
+      ]
+    },
+    "ami_features": {
+      "rows": 600,
+      "columns": [
+        "customer_id",
+        "year_month",
+        "observed_peak_ratio",
+        "observed_night_ratio",
+        "observed_load_factor",
+        "observed_weekend_weekday_ratio",
+        "observed_daily_cv",
+        "observed_power_factor",
+        "observed_reactive_ratio"
+      ]
+    },
+    "customer_info": {
+      "rows": 100,
+      "columns": [
+        "contract_type",
+        "contract_power_kw",
+        "region_code",
+        "region_sub",
+        "supply_method",
+        "usage_purpose",
+        "industry_code",
+        "customer_id"
+      ]
+    }
+  }
+}

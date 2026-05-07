@@ -29,6 +29,20 @@ code/               ← 여기가 프로젝트 루트 (cd 여기서 실행)
 └── run.py          ← 대화형 실행기
 ```
 
+### 0. JS 파일 복원 (최초 1회)
+
+메일 첨부 제한으로 `.js` 파일이 `.js.txt`로 변경되어 있습니다. 복원 필요:
+
+```bash
+# Windows
+ren ui\static\bootstrap.min.js.txt bootstrap.min.js
+ren ui\static\echarts.min.js.txt echarts.min.js
+
+# Linux
+mv ui/static/bootstrap.min.js.txt ui/static/bootstrap.min.js
+mv ui/static/echarts.min.js.txt ui/static/echarts.min.js
+```
+
 ### 1. 환경 검증
 
 ```bash

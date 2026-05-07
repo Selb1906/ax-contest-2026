@@ -79,8 +79,9 @@ def main() -> int:
     ami_parquet = preprocessed_dir / "ami_features.parquet"
     cust_parquet = preprocessed_dir / "customer_info.parquet"
 
-    if daily_parquet.exists():
-        print(f"\n[전처리 결과 감지] {preprocessed_dir}/ → 즉시 로드")
+    use_preprocessed = daily_parquet.exists()
+    if use_preprocessed:
+        print(f"\n[전처리 결과 감지] {preprocessed_dir}/ → 즉시 로드", flush=True)
     else:
         # 소스 yaml에서 CSV 경로 추출하여 자동 전처리
         import yaml as _yaml
@@ -123,6 +124,11 @@ def main() -> int:
         else:
             print("  CSV/parquet 원본 로딩...", flush=True)
             df = io_adapter.load_from_yaml(args.source, validate=False)
+        # 공공데이터 side-car 컬럼 리네임 (_temp_c → temp_c 등)
+        if "_temp_c" in df.columns:
+            df = df.rename(columns={"_temp_c": "temp_c", "_humidity": "humidity", "_wind": "wind_speed"})
+            print("  [리네임] _temp_c → temp_c, _humidity → humidity, _wind → wind_speed", flush=True)
+
         n_cust = df["customer_id"].nunique()
         prog.update(label=f"rows={len(df):,}  customers={n_cust}")
         prog.update(label=f"columns: {list(df.columns)}")
@@ -656,6 +662,17 @@ def main() -> int:
     # 완료
     # ────────────────────────────────────────────
     elapsed = time.time() - ckpt.progress.start_time if ckpt.progress.start_time else 0
+
+    # ────────────────────────────────────────────
+    # 보고서용 이미지 자동 생성
+    # ────────────────────────────────────────────
+    print("\n[보고서용 이미지 생성]", flush=True)
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "-m", "scripts.generate_figures"], check=False)
+        print("  [OK] 이미지 생성 완료", flush=True)
+    except Exception as e:
+        print(f"  [경고] 이미지 생성 실패: {e}", flush=True)
 
     print(f"""
 ╔══════════════════════════════════════════════════════╗

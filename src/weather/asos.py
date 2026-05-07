@@ -60,18 +60,30 @@ def read_asos_directory(
 ) -> pd.DataFrame:
     """ASOS 디렉터리 내 모든 CSV 로드 + 합치기.
 
+    asos_all.parquet 캐시가 있으면 우선 사용 (CSV 읽기 스킵).
+    없으면 CSV 읽기 후 parquet 캐시를 자동 저장.
+
     start_date/end_date: "2022-01-01" 형식. 지정하면 해당 기간만 필터링.
     """
     directory = Path(directory)
-    frames = []
-    for f in sorted(directory.glob("*.csv")):
-        if f.name.startswith("_"):
-            continue
-        frames.append(read_asos_csv(f))
-    if not frames:
-        raise FileNotFoundError(f"No CSV files in {directory}")
-    df = pd.concat(frames, ignore_index=True)
-    df = df.sort_values(["station_id", "ts"]).reset_index(drop=True)
+    parquet_cache = directory / "asos_all.parquet"
+
+    if parquet_cache.exists():
+        print(f"  [ASOS] parquet 캐시 로드: {parquet_cache}", flush=True)
+        df = pd.read_parquet(parquet_cache)
+    else:
+        frames = []
+        for f in sorted(directory.glob("*.csv")):
+            if f.name.startswith("_"):
+                continue
+            frames.append(read_asos_csv(f))
+        if not frames:
+            raise FileNotFoundError(f"No CSV files in {directory}")
+        df = pd.concat(frames, ignore_index=True)
+        df = df.sort_values(["station_id", "ts"]).reset_index(drop=True)
+        # 자동 캐시 저장
+        df.to_parquet(parquet_cache, index=False)
+        print(f"  [ASOS] parquet 캐시 저장: {parquet_cache}", flush=True)
 
     if start_date:
         df = df[df["ts"] >= pd.to_datetime(start_date)]
@@ -79,7 +91,8 @@ def read_asos_directory(
         df = df[df["ts"] <= pd.to_datetime(end_date)]
 
     if start_date or end_date:
-        print(f"  [ASOS] 필터링: {start_date or '시작'} ~ {end_date or '끝'} → {len(df):,}행")
+        print(f"  [ASOS] 필터링: {start_date or '시작'} ~ {end_date or '끝'} → {len(df):,}행",
+              flush=True)
 
     return df
 

@@ -37,8 +37,21 @@ def main() -> int:
     md = args.meter_day
 
     print(f"[load] {args.source}")
-    print(f"[검침일] {md}일" + (" (캘린더 월)" if md == 1 else ""))
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    print(f"[검침일] {md}일" + (" (캘린더 월)" if md == 1 else ""), flush=True)
+
+    # 전처리 parquet이 존재하면 우선 로드
+    preprocessed_daily = Path("data/preprocessed/daily.parquet")
+    if preprocessed_daily.exists():
+        print(f"  [전처리 parquet 감지] {preprocessed_daily} → 우선 로드", flush=True)
+        df = pd.read_parquet(preprocessed_daily)
+        # 고객 정보 병합
+        cust_parquet = Path("data/preprocessed/customer_info.parquet")
+        if cust_parquet.exists():
+            cust_df = pd.read_parquet(cust_parquet)
+            df = df.merge(cust_df, on="customer_id", how="left", suffixes=("", "_cust"))
+            print(f"  [고객 정보 병합] {len(cust_df):,}건", flush=True)
+    else:
+        df = io_adapter.load_from_yaml(args.source, validate=False)
 
     daily = ev.daily_by_customer(df)
     monthly = ev.monthly_by_customer(daily)
