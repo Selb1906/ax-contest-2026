@@ -20,7 +20,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 sys.stderr = _stdio.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parents[1]

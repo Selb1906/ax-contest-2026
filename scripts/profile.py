@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
 from src import io_adapter, profiler
 

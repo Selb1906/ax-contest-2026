@@ -12,7 +12,7 @@ import io as _stdio
 import sys
 import time
 
-sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
 REQUIRED = [
     ("numpy", "numpy"),

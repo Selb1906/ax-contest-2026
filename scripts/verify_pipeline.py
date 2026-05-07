@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import io as _stdio
 
 # Windows 콘솔에서 한글 출력 안 깨지게
-sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
 import pandas as pd
 
