@@ -74,9 +74,10 @@ def detect_encoding(csv_path: str) -> str:
                 print(f"  컬럼: {test.columns.tolist()}")
                 return enc
         except (UnicodeDecodeError, UnicodeError):
+            print(f"  {enc} 실패 (UnicodeError)", flush=True)
             continue
-        except Exception:
-            # C 엔진 파싱 에러 → python 엔진으로 재시도
+        except Exception as e:
+            print(f"  {enc} C엔진 실패 ({type(e).__name__}) → python 엔진 시도", flush=True)
             try:
                 test = pd.read_csv(
                     csv_path, encoding=enc, nrows=5,
@@ -86,7 +87,8 @@ def detect_encoding(csv_path: str) -> str:
                     print(f"[인코딩 감지] {enc} (python engine) — 컬럼 {len(test.columns)}개")
                     print(f"  컬럼: {test.columns.tolist()}")
                     return enc
-            except Exception:
+            except Exception as e2:
+                print(f"  {enc} python 엔진도 실패 ({type(e2).__name__})", flush=True)
                 continue
 
     # 모든 인코딩 실패 → 깨진 바이트 제거한 임시 파일 생성

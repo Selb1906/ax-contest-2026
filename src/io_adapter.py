@@ -185,14 +185,17 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
                     print(f"  [인코딩] {sp.name}: {enc}, 구분자: {'탭' if sep == chr(9) else '쉼표'}")
                     break
                 except (UnicodeDecodeError, UnicodeError):
+                    print(f"  [인코딩] {enc} 실패 (UnicodeError) → 다음 시도", flush=True)
                     continue
-                except Exception:
+                except Exception as e:
+                    print(f"  [인코딩] {enc} C엔진 실패 ({type(e).__name__}) → python 엔진 시도", flush=True)
                     try:
                         d = pd.read_csv(sp, encoding=enc, sep=sep,
                                         on_bad_lines="skip", engine="python")
-                        print(f"  [인코딩] {sp.name}: {enc} (python engine)")
+                        print(f"  [인코딩] {sp.name}: {enc} (python engine)", flush=True)
                         break
-                    except Exception:
+                    except Exception as e2:
+                        print(f"  [인코딩] {enc} python 엔진도 실패 ({type(e2).__name__}) → 다음 시도", flush=True)
                         continue
             if d is None:
                 try:
