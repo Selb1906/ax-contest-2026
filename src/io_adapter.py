@@ -149,12 +149,20 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
         )
     else:
         paths = [cfg.path]
+    print(f"  [파일] {len(paths)}개 발견", flush=True)
+    for _p in paths:
+        _sz = _p.stat().st_size / (1024**2)
+        print(f"    {_p.name} ({_sz:.1f}MB)", flush=True)
+
     if not paths:
         raise FileNotFoundError(f"dsz_lp: {cfg.path} 에 파일이 없음")
 
     frames: list[pd.DataFrame] = []
     reverse_map = {v: k for k, v in cfg.column_map.items()}
-    for sp in paths:
+    import time as _time
+    for fi, sp in enumerate(paths):
+        _t0 = _time.time()
+        print(f"  [{fi+1}/{len(paths)}] {sp.name} 로딩...", end=" ", flush=True)
         if sp.suffix.lower() == ".parquet":
             d = pd.read_parquet(sp)
         elif sp.suffix.lower() in (".xlsx", ".xls"):
@@ -186,6 +194,7 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
                 d = pd.read_csv(sp, encoding="utf-8", errors="replace",
                                 sep=sep, on_bad_lines="skip")
                 print(f"  [인코딩] {sp.name}: utf-8 (깨진 문자 대체)")
+        print(f"{len(d):,}행 ({_time.time()-_t0:.1f}초)", flush=True)
         d = d.rename(columns=reverse_map)
 
         # 날짜+시간 분리 컬럼 처리 (검침년월일 + 검침시분 → ts)

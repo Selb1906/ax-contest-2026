@@ -72,7 +72,7 @@ def main() -> int:
     print(f"  체크포인트: {args.checkpoint_dir}/ {'(이어서 실행)' if skip_done else '(새로 실행)'}")
 
     # ────────────────────────────────────────────
-    # STEP 0: 전처리 parquet 확인 (preprocess_lp.py 결과)
+    # STEP 0: 전처리 parquet 확인/생성
     # ────────────────────────────────────────────
     preprocessed_dir = Path("data/preprocessed")
     daily_parquet = preprocessed_dir / "daily.parquet"
@@ -80,19 +80,45 @@ def main() -> int:
     cust_parquet = preprocessed_dir / "customer_info.parquet"
 
     if daily_parquet.exists():
-        print(f"\n[전처리 결과 감지] {preprocessed_dir}/")
-        print(f"  preprocess_lp.py 결과를 사용합니다.")
-        use_preprocessed = True
+        print(f"\n[전처리 결과 감지] {preprocessed_dir}/ → 즉시 로드")
     else:
-        use_preprocessed = False
+        # 소스 yaml에서 CSV 경로 추출하여 자동 전처리
+        import yaml as _yaml
+        with open(args.source, "r", encoding="utf-8") as _f:
+            _src_cfg = _yaml.safe_load(_f)
+        csv_path = _src_cfg.get("source", {}).get("path", "")
+        if csv_path and Path(csv_path).exists() and Path(csv_path).suffix.lower() == ".csv":
+            csv_size_gb = Path(csv_path).stat().st_size / (1024**3)
+            if csv_size_gb > 1.0:
+                print(f"\n[대용량 CSV 감지] {csv_path} ({csv_size_gb:.1f}GB)")
+                print(f"  preprocess_lp.py로 청크 변환 시작...")
+                import subprocess
+                ret = subprocess.run(
+                    [sys.executable, "-m", "scripts.preprocess_lp", csv_path,
+                     "--outdir", str(preprocessed_dir)],
+                )
+                if ret.returncode != 0:
+                    print(f"  [경고] 전처리 실패 — 원본 CSV로 로딩 시도")
 
     # ────────────────────────────────────────────
     # STEP 1: 데이터 로딩
     # ────────────────────────────────────────────
     with ckpt.step("step1_load", skip_if_done=False) as prog:
-        if use_preprocessed:
-            print("  daily.parquet 로딩...", flush=True)
+        if daily_parquet.exists():
+            t_load = time.time()
+            print("  daily.parquet 로딩...", end=" ", flush=True)
             df = pd.read_parquet(daily_parquet)
+            print(f"OK ({time.time()-t_load:.1f}초, {len(df):,}행)")
+            # AMI 피처, 고객 정보도 로드
+            if ami_parquet.exists():
+                print("  ami_features.parquet 로딩...", end=" ", flush=True)
+                ami_df = pd.read_parquet(ami_parquet)
+                print(f"OK ({len(ami_df):,}행)")
+            if cust_parquet.exists():
+                print("  customer_info.parquet 로딩...", end=" ", flush=True)
+                cust_df = pd.read_parquet(cust_parquet)
+                df = df.merge(cust_df, on="customer_id", how="left", suffixes=("", "_cust"))
+                print(f"OK ({len(cust_df):,}행)")
             prog.update(label=f"전처리 parquet 로드 완료")
         else:
             print("  CSV/parquet 원본 로딩...", flush=True)
