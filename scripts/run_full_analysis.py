@@ -29,15 +29,23 @@ print("  pandas...", end=" ", flush=True)
 import pandas as pd
 print("OK")
 
-print("  src 모듈...", end=" ", flush=True)
+print("  src.io_adapter...", end=" ", flush=True)
 from src import baselines, eval as ev, io_adapter, profiler
+print("OK", flush=True)
+print("  src.btm_detect...", end=" ", flush=True)
 from src.btm_detect import detect as btm_detect
+print("OK", flush=True)
+print("  src.models.lgbm...", end=" ", flush=True)
 from src.checkpoint import CheckpointManager
 from src.models import lgbm
+print("OK", flush=True)
+print("  src.models.explain...", end=" ", flush=True)
 from src.models.explain import run_full_explanation
+print("OK", flush=True)
+print("  src.preprocess...", end=" ", flush=True)
 from src.preprocess import preprocess
 from src.result_saver import save_dataframe, save_chart, save_full_results
-print(f"OK ({time.time() - t_import:.1f}초)")
+print(f"OK ({time.time() - t_import:.1f}초)", flush=True)
 from src.schemas import CUSTOMER_ID
 
 
