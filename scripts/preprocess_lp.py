@@ -121,6 +121,8 @@ def _create_clean_file(csv_path: str) -> str:
 # 시간 파싱
 # ──────────────────────────────────────────────────────────
 
+_cached_dt_format = None  # 첫 청크에서 감지 후 재사용
+
 def parse_timestamps(chunk: pd.DataFrame) -> pd.DataFrame:
     """ts_date + ts_time → datetime, hour, date, year_month, dayofweek 컬럼 생성.
 
@@ -140,12 +142,29 @@ def parse_timestamps(chunk: pd.DataFrame) -> pd.DataFrame:
         time_str_fixed = time_str.where(~is_2400, "0000")
         combined = date_str + " " + time_str_fixed.str[:2] + ":" + time_str_fixed.str[2:]
 
-    # 포맷 명시로 빠르게 파싱 (추론 방지)
-    dt = pd.to_datetime(combined, errors="coerce", format="%Y-%m-%d %H:%M")
-    if dt.isna().sum() > len(dt) * 0.5:
-        # 다른 포맷 시도
-    if dt.isna().all():
-        dt = pd.to_datetime(combined, errors="coerce", format="mixed")
+    # 포맷 자동 감지 (첫 청크에서 판별 → 캐시 → 이후 재사용)
+    global _cached_dt_format
+    if _cached_dt_format is None:
+        sample = combined.dropna().iloc[0] if len(combined.dropna()) > 0 else ""
+        for candidate in ["%Y-%m-%d %H:%M", "%Y%m%d %H:%M", "%Y-%m-%d %H%M",
+                           "%Y%m%d %H%M", "%Y/%m/%d %H:%M",
+                           "%Y-%m-%d %H:%M:%S", "%Y%m%d %H:%M:%S"]:
+            try:
+                pd.to_datetime(sample, format=candidate)
+                _cached_dt_format = candidate
+                print(f"    [시간 포맷 감지] {candidate} (샘플: {sample})", flush=True)
+                break
+            except Exception:
+                continue
+        if _cached_dt_format is None:
+            _cached_dt_format = "mixed"
+            print(f"    [시간 포맷] 자동 추론 (느림, 샘플: {sample})", flush=True)
+
+    if _cached_dt_format == "mixed":
+        dt = pd.to_datetime(combined, errors="coerce")
+    else:
+        dt = pd.to_datetime(combined, errors="coerce", format=_cached_dt_format)
+
     # 그래도 object면 강제 변환
     if not hasattr(dt.dtype, 'tz') and dt.dtype == object:
         dt = pd.to_datetime(dt, errors="coerce")
