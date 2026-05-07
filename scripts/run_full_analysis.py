@@ -213,6 +213,24 @@ def main() -> int:
         from src.split import time_split, suggest_split, check_leakage
 
         features_pre, spec = lgbm.build_features(df)
+
+        # 전처리 모드: preprocess_lp에서 미리 계산한 AMI 피처 조인
+        if use_preprocessed and ami_parquet.exists() and 'ami_df' in dir():
+            ami_cols_to_join = [c for c in ami_df.columns if c not in features_pre.columns
+                                or c in ("customer_id", "year_month")]
+            if len(ami_cols_to_join) > 2:  # customer_id, year_month 외에 피처가 있으면
+                features_pre["year_month_str"] = features_pre["year_month"].astype(str)
+                ami_join = ami_df.copy()
+                ami_join["year_month_str"] = ami_join["year_month"].astype(str)
+                features_pre = features_pre.merge(
+                    ami_join.drop(columns=["year_month"], errors="ignore"),
+                    left_on=["customer_id", "year_month_str"],
+                    right_on=["customer_id", "year_month_str"],
+                    how="left"
+                )
+                features_pre = features_pre.drop(columns=["year_month_str"], errors="ignore")
+                print(f"  [AMI 피처 조인] {len(ami_cols_to_join)-2}개 피처 추가", flush=True)
+
         prog.update(label=f"피처: {len(spec.all)}개, 행: {len(features_pre):,}")
 
         if args.train_end:
