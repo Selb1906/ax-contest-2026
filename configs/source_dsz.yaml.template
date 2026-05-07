@@ -6,7 +6,7 @@ source:
 
   column_map:
     # 필수
-    customer_id:     "계약번호"       # 또는 "계기번호" — 현장에서 확인
+    customer_id:     "계약번호"
     ts_date:         "검침년월일"     # 날짜 (별도 컬럼)
     ts_time:         "검침시분"       # 시간 (별도 컬럼)
     contract_type:   "계약종별"
