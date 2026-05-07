@@ -34,28 +34,41 @@
 ## 다음 방문 시 해야 할 것
 
 ### 사전 준비 (로컬에서)
-1. `missing_py39_wheels.zip` 직원에게 사전 설치 요청
-2. `io_adapter.py` 수정본 반영 (encoding_errors 처리)
-3. `fix_csv.py` 코드 zip에 포함
+1. `missing_py39_wheels.zip` 직원에게 사전 설치 요청 (메일)
+2. 코드 zip 최신화 (io_adapter 수정, csv_to_parquet 포함)
 
-### 안심구역 도착 후 순서
+### 안심구역 도착 후 순서 (예상 시간)
+
+#### Phase 1: 환경 (10분)
 1. 가상환경 활성화: `E:\반입데이터\venv\Scripts\activate`
-2. 누락 패키지 설치 확인 (이미 직원이 설치했을 수 있음)
-3. `python -m scripts.verify_env` 전체 통과 확인
-4. `fix_csv.py` 실행 → `clean.csv` 생성 (약 30~60분 예상)
-5. yaml path를 `clean.csv`로 설정
-6. `python -m scripts.run_full_analysis --source configs/source_dsz.yaml`
-7. 이후 pipeline 순서대로 진행
+2. 누락 패키지 설치 확인: `python -m scripts.verify_env`
 
-### io_adapter.py 수정 사항 (165줄)
-```python
-# 현재 (에러 발생):
-                d = pd.read_csv(sp, encoding="utf-8-sig")
-
-# 수정 후:
-                d = pd.read_csv(sp, on_bad_lines="skip")
+#### Phase 2: CSV → Parquet 변환 (20~30분)
+```bash
+python scripts/csv_to_parquet.py "E:\lpdata\data.csv" "E:\lpdata\data.parquet"
 ```
-clean.csv는 이미 UTF-8이므로 encoding 지정 불필요.
+34GB CSV → ~3-5GB Parquet. 이후 모든 읽기가 1~2분으로 단축.
+
+yaml 수정:
+```yaml
+path: "E:\\lpdata\\data.parquet"
+```
+
+#### Phase 3: 전체 파이프라인 (3~4시간)
+```bash
+python -m scripts.run_full_analysis --source configs/source_dsz.yaml
+```
+
+#### Phase 4: 대시보드 + 이미지 + 반출 (30분)
+```bash
+python -m scripts.prepare_ui_data --source configs/source_dsz.yaml
+python -m scripts.generate_dashboard
+python -m scripts.generate_figures
+python -m scripts.export_summary --dashboard
+```
+
+#### Phase 5: 반출 신청
+`export/` 폴더 반출 신청
 
 ## 데이터 특성 (확인된 것)
 - 파일 포맷: CSV, UTF-8 BOM
