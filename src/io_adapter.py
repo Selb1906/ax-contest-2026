@@ -198,10 +198,11 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
                 try:
                     d = pd.read_csv(sp, encoding="utf-8", encoding_errors="replace",
                                     sep=sep, on_bad_lines="skip")
+                    print(f"  [인코딩] {sp.name}: utf-8 (encoding_errors=replace)", flush=True)
                 except TypeError:
+                    print(f"  [인코딩] encoding_errors 미지원 → python 엔진 fallback", flush=True)
                     d = pd.read_csv(sp, encoding="utf-8", sep=sep,
                                     on_bad_lines="skip", engine="python")
-                print(f"  [인코딩] {sp.name}: utf-8 (깨진 문자 대체)", flush=True)
         print(f"{len(d):,}행 ({_time.time()-_t0:.1f}초)", flush=True)
         d = d.rename(columns=reverse_map)
 
