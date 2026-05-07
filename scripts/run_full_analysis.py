@@ -18,9 +18,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
-import numpy as np
-import pandas as pd
+print("[준비] 라이브러리 로딩 중...")
+t_import = time.time()
 
+print("  numpy...", end=" ", flush=True)
+import numpy as np
+print("OK")
+
+print("  pandas...", end=" ", flush=True)
+import pandas as pd
+print("OK")
+
+print("  src 모듈...", end=" ", flush=True)
 from src import baselines, eval as ev, io_adapter, profiler
 from src.btm_detect import detect as btm_detect
 from src.checkpoint import CheckpointManager
@@ -28,6 +37,7 @@ from src.models import lgbm
 from src.models.explain import run_full_explanation
 from src.preprocess import preprocess
 from src.result_saver import save_dataframe, save_chart, save_full_results
+print(f"OK ({time.time() - t_import:.1f}초)")
 from src.schemas import CUSTOMER_ID
 
 
@@ -62,10 +72,31 @@ def main() -> int:
     print(f"  체크포인트: {args.checkpoint_dir}/ {'(이어서 실행)' if skip_done else '(새로 실행)'}")
 
     # ────────────────────────────────────────────
+    # STEP 0: 전처리 parquet 확인 (preprocess_lp.py 결과)
+    # ────────────────────────────────────────────
+    preprocessed_dir = Path("data/preprocessed")
+    daily_parquet = preprocessed_dir / "daily.parquet"
+    ami_parquet = preprocessed_dir / "ami_features.parquet"
+    cust_parquet = preprocessed_dir / "customer_info.parquet"
+
+    if daily_parquet.exists():
+        print(f"\n[전처리 결과 감지] {preprocessed_dir}/")
+        print(f"  preprocess_lp.py 결과를 사용합니다.")
+        use_preprocessed = True
+    else:
+        use_preprocessed = False
+
+    # ────────────────────────────────────────────
     # STEP 1: 데이터 로딩
     # ────────────────────────────────────────────
     with ckpt.step("step1_load", skip_if_done=False) as prog:
-        df = io_adapter.load_from_yaml(args.source, validate=False)
+        if use_preprocessed:
+            print("  daily.parquet 로딩...", flush=True)
+            df = pd.read_parquet(daily_parquet)
+            prog.update(label=f"전처리 parquet 로드 완료")
+        else:
+            print("  CSV/parquet 원본 로딩...", flush=True)
+            df = io_adapter.load_from_yaml(args.source, validate=False)
         n_cust = df["customer_id"].nunique()
         prog.update(label=f"rows={len(df):,}  customers={n_cust}")
         prog.update(label=f"columns: {list(df.columns)}")
