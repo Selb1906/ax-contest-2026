@@ -53,7 +53,7 @@ def try_read(path: Path, nrows: int = 5) -> tuple[pd.DataFrame | None, str]:
 def guess_column_map(columns: list[str]) -> dict[str, str]:
     """컬럼명에서 표준 매핑 추측."""
     patterns = {
-        "customer_id": ["계약번호", "계기번호", "고객", "cust", "id", "번호"],
+        "customer_id": ["계약번호", "고객", "cust", "id"],
         "ts_date": ["검침년월일", "검침일자"],
         "ts_time": ["검침시분"],
         "ts": ["일시", "검침", "날짜", "date", "time", "dt", "metering"],
