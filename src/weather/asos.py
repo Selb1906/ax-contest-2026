@@ -53,8 +53,15 @@ def read_asos_csv(path: str | Path) -> pd.DataFrame:
     return df
 
 
-def read_asos_directory(directory: str | Path) -> pd.DataFrame:
-    """ASOS 디렉터리 내 모든 CSV 로드 + 합치기."""
+def read_asos_directory(
+    directory: str | Path,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """ASOS 디렉터리 내 모든 CSV 로드 + 합치기.
+
+    start_date/end_date: "2022-01-01" 형식. 지정하면 해당 기간만 필터링.
+    """
     directory = Path(directory)
     frames = []
     for f in sorted(directory.glob("*.csv")):
@@ -65,6 +72,15 @@ def read_asos_directory(directory: str | Path) -> pd.DataFrame:
         raise FileNotFoundError(f"No CSV files in {directory}")
     df = pd.concat(frames, ignore_index=True)
     df = df.sort_values(["station_id", "ts"]).reset_index(drop=True)
+
+    if start_date:
+        df = df[df["ts"] >= pd.to_datetime(start_date)]
+    if end_date:
+        df = df[df["ts"] <= pd.to_datetime(end_date)]
+
+    if start_date or end_date:
+        print(f"  [ASOS] 필터링: {start_date or '시작'} ~ {end_date or '끝'} → {len(df):,}행")
+
     return df
 
 
