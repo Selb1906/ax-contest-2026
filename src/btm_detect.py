@@ -57,7 +57,7 @@ def _signal_negative(df: pd.DataFrame) -> pd.DataFrame:
 # ── 신호 2: 낮 시간 골짜기 (12~15시 vs 일평균) ──
 
 
-def _load_asos_solar(asos_dir: str = "ASOS") -> pd.Series | None:
+def _load_asos_solar(asos_dir: str = "ASOS", start_date=None, end_date=None) -> pd.Series | None:
     """ASOS 시간별 일사량 로드 → 전국 가중평균."""
     from pathlib import Path
     p = Path(asos_dir)
@@ -65,7 +65,7 @@ def _load_asos_solar(asos_dir: str = "ASOS") -> pd.Series | None:
         return None
     try:
         from .weather.asos import read_asos_directory, EIGHT_CITY_WEIGHTS
-        asos = read_asos_directory(str(p))
+        asos = read_asos_directory(str(p), start_date=start_date, end_date=end_date)
         if "solar_mj" not in asos.columns:
             return None
         asos["datetime_h"] = asos["ts"].dt.floor("h")
@@ -103,8 +103,10 @@ def _signal_daytime_valley(df: pd.DataFrame) -> pd.DataFrame:
     d["datetime_h"] = t.dt.floor("h")
     d["date"] = t.dt.normalize()
 
-    # ASOS 일사량 로드 + 조인
-    solar_series = _load_asos_solar()
+    # ASOS 일사량 로드 + 조인 (LP 기간만)
+    ts_min = str(t.min().date()) if t.notna().any() else None
+    ts_max = str(t.max().date()) if t.notna().any() else None
+    solar_series = _load_asos_solar(start_date=ts_min, end_date=ts_max)
 
     if solar_series is not None and len(solar_series) > 100:
         d["solar_mj"] = d["datetime_h"].map(solar_series)
