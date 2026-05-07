@@ -97,7 +97,7 @@ def attach_weather(horizon, config):
     return horizon
 
 
-SLIDING_METER_DAYS = list(range(1, 29))  # run_full_analysis에서 재정의 가능
+SLIDING_METER_DAYS = list(range(1, 32))  # 한전 검침일 1~31 (7차 말일 포함)
 
 
 def run_single_experiment(df, config, train_end):

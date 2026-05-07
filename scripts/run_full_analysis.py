@@ -50,17 +50,17 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true", help="체크포인트에서 이어서 실행")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--meter-days", default=None,
-                        help="검침일 목록 (쉼표 구분, 예: 1,15). 미지정 시 1~28 전수")
+                        help="검침일 목록 (쉼표 구분, 예: 1,15). 미지정 시 1~31 전수")
     args = parser.parse_args()
 
     ckpt = CheckpointManager(args.checkpoint_dir)
     skip_done = args.resume
 
-    # 검침일 파싱
+    # 검침일 파싱 (한전 검침일: 1차 1~5, 2차 8~12, 3차 15~17, 4차 18~19, 5차 22~24, 6차 25~26, 7차 말일)
     if args.meter_days:
         METER_DAYS = [int(x) for x in args.meter_days.split(",")]
     else:
-        METER_DAYS = list(range(1, 29))
+        METER_DAYS = list(range(1, 32))
 
     print("""
 ╔══════════════════════════════════════════════════════╗
