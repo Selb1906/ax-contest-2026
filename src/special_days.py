@@ -23,20 +23,54 @@ import pandas as pd
 
 
 def load_holidays(path: str | Path | None = None) -> pd.DataFrame:
-    """공휴일 CSV 로드. category 컬럼 포함."""
+    """공휴일 로드. parquet 캐시 우선, 없으면 CSV fallback + 자동 캐시 저장.
+
+    category 컬럼 포함.
+    """
     if path is None:
-        candidates = [
+        # parquet 후보를 먼저 탐색
+        parquet_candidates = [
+            Path("dsz_bundle/external_data/holidays_kr.parquet"),
+            Path("external_data/holidays_kr.parquet"),
+            Path("data/holidays_kr.parquet"),
+        ]
+        for p in parquet_candidates:
+            if p.exists():
+                print(f"  [holidays] parquet 캐시 로드: {p}", flush=True)
+                return pd.read_parquet(p)
+
+        # parquet 없으면 CSV 후보 탐색
+        csv_candidates = [
             Path("dsz_bundle/external_data/holidays_kr.csv"),
             Path("external_data/holidays_kr.csv"),
             Path("data/holidays_kr.csv"),
         ]
-        for p in candidates:
+        for p in csv_candidates:
             if p.exists():
                 path = p
                 break
+
     if path is None:
         return pd.DataFrame(columns=["date", "name", "type", "category"])
+
+    path = Path(path)
+    parquet_path = path.with_suffix(".parquet")
+
+    # parquet 캐시가 있으면 우선 사용
+    if parquet_path.exists():
+        print(f"  [holidays] parquet 캐시 로드: {parquet_path}", flush=True)
+        return pd.read_parquet(parquet_path)
+
+    # CSV 읽기
     df = pd.read_csv(path, parse_dates=["date"])
+
+    # parquet 캐시 자동 저장
+    try:
+        df.to_parquet(parquet_path, index=False)
+        print(f"  [holidays] parquet 캐시 저장: {parquet_path}", flush=True)
+    except Exception:
+        pass  # 쓰기 권한 없는 경우 무시
+
     return df
 
 

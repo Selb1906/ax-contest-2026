@@ -69,8 +69,25 @@ class SourceConfig:
 
 def _load_synth(cfg: SourceConfig) -> pd.DataFrame:
     """src.synth 로 만든 parquet (partition=customer_id) 로드."""
-    df = pd.read_parquet(cfg.path, engine="pyarrow")
-    # partition column 은 읽을 때 카테고리 문자열로 복원됨
+    import time as _time
+    p = Path(cfg.path)
+    t0 = _time.time()
+
+    if p.is_dir():
+        parts = sorted(p.rglob("*.parquet"))
+        print(f"  [synth] parquet 디렉토리: {len(parts)}개 파트", flush=True)
+        frames = []
+        for i, part in enumerate(parts):
+            frames.append(pd.read_parquet(part, engine="pyarrow"))
+            if (i + 1) % 50 == 0 or i == len(parts) - 1:
+                rows_so_far = sum(len(f) for f in frames)
+                print(f"    {i+1}/{len(parts)} 파트 ({rows_so_far:,}행, {_time.time()-t0:.1f}초)", flush=True)
+        df = pd.concat(frames, ignore_index=True)
+    else:
+        print(f"  [synth] parquet 파일 로딩...", end=" ", flush=True)
+        df = pd.read_parquet(p, engine="pyarrow")
+        print(f"{len(df):,}행 ({_time.time()-t0:.1f}초)", flush=True)
+
     if df[TS].dtype == object:
         df[TS] = pd.to_datetime(df[TS])
     return df

@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import argparse
+import io as _stdio
 import sys
 import time
 from pathlib import Path
 
-# 프로젝트 루트를 import path 에 추가
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
 from src import schemas
 from src.synth import GeneratorConfig, generate, write_parquet
