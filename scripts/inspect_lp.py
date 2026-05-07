@@ -63,7 +63,6 @@ def guess_column_map(columns: list[str]) -> dict[str, str]:
         "p_reactive_lead": ["진상무효전력량계", "진상무효"],
         "p_reactive_kwh": ["무효전력량계", "무효", "reactive", "kvarh"],
         "p_apparent_kwh": ["피상전력량계", "피상", "apparent"],
-        "max_demand_kw": ["최대수요", "max_demand", "피크", "peak"],
         "n_households": ["세대", "household", "가구"],
         "contract_power_kw": ["계약전력", "contract_power"],
         "region_code": ["본부", "지역", "region", "시도"],
