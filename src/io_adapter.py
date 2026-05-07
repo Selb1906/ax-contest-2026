@@ -211,7 +211,7 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
 
         # 날짜+시간 분리 컬럼 처리 (검침년월일 + 검침시분 → ts)
         if TS not in d.columns and "ts_date" in d.columns and "ts_time" in d.columns:
-            date_str = d["ts_date"].astype(str).str.strip()
+            date_str = d["ts_date"].astype(str).str.strip().str[:10]  # datetime → date only
             time_str = d["ts_time"].astype(str).str.strip()
 
             # 형식 자동 감지: "0:00" (H:MM) vs "0000" (HHMM)

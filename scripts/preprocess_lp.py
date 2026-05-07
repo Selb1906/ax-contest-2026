@@ -128,7 +128,7 @@ def parse_timestamps(chunk: pd.DataFrame) -> pd.DataFrame:
 
     검침시분 "2400" → 다음날 00:00 보정.
     """
-    date_str = chunk["ts_date"].astype(str).str.strip()
+    date_str = chunk["ts_date"].astype(str).str.strip().str[:10]  # "2022-01-01 00:00:00" → "2022-01-01"
     time_str = chunk["ts_time"].astype(str).str.strip()
 
     # 형식 자동 감지: "0:00" (H:MM) vs "0000" (HHMM)
