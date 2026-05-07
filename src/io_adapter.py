@@ -204,6 +204,11 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
                 combined = date_str + " " + time_str.str[:2] + ":" + time_str.str[2:]
 
             d[TS] = pd.to_datetime(combined, errors="coerce", format="mixed")
+            nat_count = d[TS].isna().sum()
+            if nat_count == len(d):
+                print(f"  [경고] ts 전부 파싱 실패! 검침시분 샘플: {time_str.head(3).tolist()}")
+            elif nat_count > 0:
+                print(f"  [경고] ts 파싱 실패 {nat_count}건 / {len(d)}건")
             if is_2400.any():
                 d.loc[is_2400, TS] = d.loc[is_2400, TS] + pd.Timedelta(days=1)
             d = d.drop(columns=["ts_date", "ts_time"], errors="ignore")
