@@ -188,12 +188,22 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
         # 날짜+시간 분리 컬럼 처리 (검침년월일 + 검침시분 → ts)
         if TS not in d.columns and "ts_date" in d.columns and "ts_time" in d.columns:
             date_str = d["ts_date"].astype(str).str.strip()
-            time_str = d["ts_time"].astype(str).str.strip().str.zfill(4)
-            # 2400 → 0000+1일 보정
-            is_2400 = time_str == "2400"
-            time_str = time_str.replace("2400", "0000")
-            combined = date_str + " " + time_str.str[:2] + ":" + time_str.str[2:]
-            d[TS] = pd.to_datetime(combined, errors="coerce")
+            time_str = d["ts_time"].astype(str).str.strip()
+
+            # 형식 자동 감지: "0:00" (H:MM) vs "0000" (HHMM)
+            if time_str.str.contains(":").any():
+                # H:MM 또는 HH:MM 형식 → 그대로 결합
+                is_2400 = time_str.isin(["24:00", "2400"])
+                time_str = time_str.replace("24:00", "00:00")
+                combined = date_str + " " + time_str
+            else:
+                # HHMM 형식 → HH:MM으로 변환
+                time_str = time_str.str.zfill(4)
+                is_2400 = time_str == "2400"
+                time_str = time_str.replace("2400", "0000")
+                combined = date_str + " " + time_str.str[:2] + ":" + time_str.str[2:]
+
+            d[TS] = pd.to_datetime(combined, errors="coerce", format="mixed")
             if is_2400.any():
                 d.loc[is_2400, TS] = d.loc[is_2400, TS] + pd.Timedelta(days=1)
             d = d.drop(columns=["ts_date", "ts_time"], errors="ignore")
