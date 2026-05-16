@@ -86,16 +86,14 @@ def build_horizon_table(
     d["_cal_month"] = d["date"].dt.to_period("M")
     d["year_month"] = d["_cal_month"]
     if meter_day and meter_day > 1:
-        d["year_month"] = d.apply(
-            lambda r: r["_cal_month"] if r["day_of_month"] >= r["_meter_day"]
-            else r["_cal_month"] - 1,
-            axis=1,
-        )
-        d["day_since_meter"] = d.apply(
-            lambda r: r["day_of_month"] - r["_meter_day"]
-            if r["day_of_month"] >= r["_meter_day"]
-            else r["day_of_month"] + (r["date"].days_in_month - r["_meter_day"]),
-            axis=1,
+        before_meter = d["day_of_month"] < meter_day
+        d["year_month"] = d["_cal_month"].copy()
+        d.loc[before_meter, "year_month"] = d.loc[before_meter, "_cal_month"] - 1
+        dim = d["date"].dt.days_in_month
+        d["day_since_meter"] = np.where(
+            before_meter,
+            d["day_of_month"] + (dim - meter_day),
+            d["day_of_month"] - meter_day,
         )
     else:
         d["year_month"] = d["date"].dt.to_period("M")
@@ -108,22 +106,26 @@ def build_horizon_table(
         .reset_index(name="days_in_month")
     )
     full = (
-        d.groupby([CUSTOMER_ID, CONTRACT_TYPE, "year_month"], observed=True)["day_kwh"]
+        d.groupby([CUSTOMER_ID, "year_month"], observed=True)["day_kwh"]
         .sum()
         .reset_index(name="full_month_kwh")
     )
+    # contract_type은 고객 단위로 하나만 유지
+    if CONTRACT_TYPE in d.columns:
+        ct_lookup = d.groupby(CUSTOMER_ID, observed=True)[CONTRACT_TYPE].first().reset_index()
+        full = full.merge(ct_lookup, on=CUSTOMER_ID, how="left")
 
     frames = []
     for h in horizons:
         partial = (
             d[d["day_since_meter"] < h]
-            .groupby([CUSTOMER_ID, CONTRACT_TYPE, "year_month"], observed=True)[
+            .groupby([CUSTOMER_ID, "year_month"], observed=True)[
                 "day_kwh"
             ]
             .sum()
             .reset_index(name="partial_kwh")
         )
-        tbl = partial.merge(full, on=[CUSTOMER_ID, CONTRACT_TYPE, "year_month"])
+        tbl = partial.merge(full, on=[CUSTOMER_ID, "year_month"])
         tbl = tbl.merge(billing_days, on=[CUSTOMER_ID, "year_month"])
         tbl["horizon_days"] = h
         tbl["days_observed"] = np.minimum(h, tbl["days_in_month"])
@@ -139,7 +141,11 @@ def build_horizon_table(
 # --------------------------------------------------------------
 
 
-def regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+def regression_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    customer_ids: np.ndarray | None = None,
+) -> dict:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     mask = np.isfinite(y_true) & np.isfinite(y_pred) & (y_true > 0)
@@ -152,7 +158,7 @@ def regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     mean_true = float(np.mean(yt))
     mape = np.mean(abs_err / yt) * 100
     smape = np.mean(2 * abs_err / (np.abs(yt) + np.abs(yp))) * 100
-    return {
+    result = {
         "n": int(mask.sum()),
         "mae": float(np.mean(abs_err)),
         "rmse": rmse,
@@ -163,6 +169,23 @@ def regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         "bias": float(np.mean(err)),
         "std_error": float(np.std(err)),
     }
+    # 고객별 CVRMSE median
+    if customer_ids is not None:
+        cids = np.asarray(customer_ids)[mask]
+        unique_cids = np.unique(cids)
+        cust_cvrmses = []
+        for cid in unique_cids:
+            cmask = cids == cid
+            c_yt = yt[cmask]
+            c_err = err[cmask]
+            if len(c_yt) >= 2 and np.mean(c_yt) > 0:
+                c_rmse = float(np.sqrt(np.mean(c_err**2)))
+                cust_cvrmses.append(c_rmse / np.mean(c_yt) * 100)
+        if cust_cvrmses:
+            result["cvrmse_median_pct"] = float(np.median(cust_cvrmses))
+            result["cvrmse_q25_pct"] = float(np.percentile(cust_cvrmses, 25))
+            result["cvrmse_q75_pct"] = float(np.percentile(cust_cvrmses, 75))
+    return result
 
 
 # --------------------------------------------------------------
@@ -181,7 +204,8 @@ def attach_alarm_context(
     horizon_tbl: pd.DataFrame, monthly: pd.DataFrame
 ) -> pd.DataFrame:
     """horizon_tbl 에 전월·전년동월·직전3개월평균 월간 사용량을 붙인다."""
-    m = monthly.set_index([CUSTOMER_ID, "year_month"])["monthly_kwh"].sort_index()
+    _monthly = monthly.drop_duplicates([CUSTOMER_ID, "year_month"])
+    m = _monthly.set_index([CUSTOMER_ID, "year_month"])["monthly_kwh"].sort_index()
 
     def _lookup(cust: str, ym: pd.Period) -> float:
         try:

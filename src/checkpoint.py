@@ -8,6 +8,11 @@
 from __future__ import annotations
 
 import json
+
+
+class SkipStep(Exception):
+    """resume 시 이미 완료된 Step을 건너뛰기 위한 예외."""
+    pass
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -25,6 +30,7 @@ class Progress:
     step_name: str = ""
     start_time: float = 0
     sub_label: str = ""
+    _skipped: bool = False
 
     def start(self, step_name: str, total: int = 0):
         self.step_name = step_name
@@ -144,10 +150,12 @@ class CheckpointManager:
                     prog.update(1, label=stat.name)
         """
         if skip_if_done and self.has_checkpoint(step_name):
-            print(f"\n[SKIP] {step_name} — 이전 체크포인트 존재")
+            print(f"\n[SKIP] {step_name} — 이전 체크포인트 존재", flush=True)
             self._log("skip", {"step": step_name})
+            self.progress._skipped = True
             yield self.progress
             return
+        self.progress._skipped = False
 
         self.progress.start(step_name, total)
         self._log("start")

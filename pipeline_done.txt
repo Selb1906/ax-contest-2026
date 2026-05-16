@@ -1,0 +1,20 @@
+시작: 2026-05-11 12:03:21.436053
+종료: 2026-05-11 12:11:27.121057
+총 소요: 486초 (8.1분)
+결과: OK 15 / FAIL 0 / SKIP 0
+
+OK   step4_baselines (1초)
+OK   step4_5_split (1초)
+OK   step5_lgbm (1초)
+OK   step5_5_sliding (6초)
+OK   step6_shap (8초)
+OK   step7_weather_opt (8초)
+OK   step8_sensitivity (1초)
+OK   step10_ablation (328초)
+OK   step11_retrain_optimal (27초)
+OK   step11_5_residual (0초)
+OK   step12_tuning (59초)
+OK   step12_5_tuned_sliding (29초)
+OK   step13_scale (1초)
+OK   figures_generate (5초)
+OK   export_collect (5초)

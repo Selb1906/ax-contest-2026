@@ -76,7 +76,10 @@ def read_asos_directory(
         for f in sorted(directory.glob("*.csv")):
             if f.name.startswith("_"):
                 continue
-            frames.append(read_asos_csv(f))
+            try:
+                frames.append(read_asos_csv(f))
+            except (KeyError, ValueError) as e:
+                print(f"  [ASOS] {f.name} 스킵 (ASOS 형식 아님: {e})", flush=True)
         if not frames:
             raise FileNotFoundError(f"No CSV files in {directory}")
         df = pd.concat(frames, ignore_index=True)
@@ -182,9 +185,17 @@ def monthly_weather_features(
         if col in df.columns:
             d[col] = pd.to_numeric(df[col], errors="coerce")
 
-    extra = d.groupby(["station_id", "year_month"]).agg(
-        **{f"{c}_mean": (c, "mean") for c in extra_cols if c in d.columns}
-    ).reset_index()
+    # 강수량
+    if "precip_mm" in df.columns:
+        d["precip_mm"] = pd.to_numeric(df["precip_mm"], errors="coerce").fillna(0)
+        d["is_rainy"] = (d["precip_mm"] > 0).astype(int)
+
+    agg_dict = {f"{c}_mean": (c, "mean") for c in extra_cols if c in d.columns}
+    if "precip_mm" in d.columns:
+        agg_dict["precip_sum"] = ("precip_mm", "sum")
+        agg_dict["rainy_hours"] = ("is_rainy", "sum")
+
+    extra = d.groupby(["station_id", "year_month"]).agg(**agg_dict).reset_index()
 
     result = dh.merge(extra, on=["station_id", "year_month"], how="left")
     return result

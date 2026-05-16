@@ -11,7 +11,10 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_PROJECT_ROOT))
+os.chdir(_PROJECT_ROOT)
 sys.stdout = _stdio.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
 import numpy as np
@@ -50,9 +53,9 @@ def main() -> int:
   모델:   {args.weights}
 """)
 
-    # 데이터 + 모델 로드
+    # 데이터 + 모델 로드 — preprocessed parquet 우선
     with ckpt.step("load", skip_if_done=False) as prog:
-        df = io_adapter.load_from_yaml(args.source, validate=False)
+        df = io_adapter.load_smart(args.source, validate=False)
         df, _ = preprocess(df)
         booster, spec = load(args.weights)
         prog.update(label=f"데이터: {len(df):,}행, 모델: {len(spec.all)} 피처")

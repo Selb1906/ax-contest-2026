@@ -73,6 +73,9 @@ def load_pipeline_data(
         else:
             data[name] = None
 
+    # -- TOU breakdown --
+    data["tou_breakdown"] = _safe_read_parquet(ui_dir / "tou_breakdown.parquet")
+
     # -- eval results --
     for name in ("baselines", "lgbm_vs_baselines"):
         csv_path = eval_dir / f"{name}.csv"
@@ -614,7 +617,7 @@ body {
   </div>
 
   <div class="alert alert-secondary py-1 px-3 mb-2" style="font-size:0.82rem; opacity:0.8;">
-    ※ 검침일 1일 기준 계산 (검침일에 따른 계절 혼합 미적용 — 향후 개선 예정)
+    ※ 검침일 1일 기준 요금 시뮬레이션 (서버 측 tariff.py에서는 검침일별 계절 혼합 적용)
   </div>
   <!-- Tariff KPI -->
   <div class="row g-3 mb-3" id="tariff-kpis"></div>
@@ -791,17 +794,29 @@ const TARIFF = (function() {
             effective_rate: kwh > 0 ? +(total/kwh).toFixed(1) : 0, tariff_type: "seasonal_flat"};
   }
 
-  function touBill(kwh, rates, season, demandKw) {
+  function touBill(kwh, rates, season, demandKw, touRatios) {
     const sr = rates[season];
-    // default TOU ratios: off 30%, mid 40%, on 30%
-    const energy = kwh * (0.3 * sr.off + 0.4 * sr.mid + 0.3 * sr.on);
+    const rOff = (touRatios && touRatios.off != null) ? touRatios.off : 0.3;
+    const rMid = (touRatios && touRatios.mid != null) ? touRatios.mid : 0.4;
+    const rOn  = (touRatios && touRatios.on  != null) ? touRatios.on  : 0.3;
+    const offKwh = kwh * rOff, midKwh = kwh * rMid, onKwh = kwh * rOn;
+    const offWon = offKwh * sr.off, midWon = midKwh * sr.mid, onWon = onKwh * sr.on;
+    const energy = offWon + midWon + onWon;
     const base = demandKw * rates.base_kw;
     const total = base + energy;
+    const allOnPeak = kwh * sr.on;
     return {base_won: Math.round(base), energy_won: Math.round(energy), elec_won: Math.round(total),
-            effective_rate: kwh > 0 ? +(total/kwh).toFixed(1) : 0, tariff_type: "tou"};
+            effective_rate: kwh > 0 ? +(total/kwh).toFixed(1) : 0, tariff_type: "tou",
+            tou_detail: {
+              off: {kwh: Math.round(offKwh), rate: sr.off, won: Math.round(offWon)},
+              mid: {kwh: Math.round(midKwh), rate: sr.mid, won: Math.round(midWon)},
+              on:  {kwh: Math.round(onKwh),  rate: sr.on,  won: Math.round(onWon)},
+            },
+            tou_saving: Math.round(allOnPeak - energy),
+    };
   }
 
-  function calcElec(kwh, ctKey, month, demandKw) {
+  function calcElec(kwh, ctKey, month, demandKw, touRatios) {
     const season = getSeason(month);
     const summerFlag = (month === 7 || month === 8) ? "summer" : "normal";
 
@@ -816,20 +831,20 @@ const TARIFF = (function() {
     // 일반용(갑)II TOU
     if (ctKey.startsWith("gap_ii_")) {
       const sub = ctKey.replace("gap_ii_","");
-      return touBill(kwh, GAP_II[sub] || GAP_II.high_a_1, season, demandKw);
+      return touBill(kwh, GAP_II[sub] || GAP_II.high_a_1, season, demandKw, touRatios);
     }
     // 일반용(을) <300kW
     if (ctKey.startsWith("eul_small_")) {
       const sub = ctKey.replace("eul_small_","");
       if (sub.startsWith("high_") && EUL_SMALL_TOU[sub]) {
-        return touBill(kwh, EUL_SMALL_TOU[sub], season, demandKw);
+        return touBill(kwh, EUL_SMALL_TOU[sub], season, demandKw, touRatios);
       }
       return seasonalFlatBill(kwh, EUL_SMALL[sub] || EUL_SMALL.low, season, demandKw);
     }
     // 일반용(을) 300kW+
     if (ctKey.startsWith("eul_large_")) {
       const sub = ctKey.replace("eul_large_","");
-      return touBill(kwh, EUL_LARGE[sub] || EUL_LARGE.high_a_1, season, demandKw);
+      return touBill(kwh, EUL_LARGE[sub] || EUL_LARGE.high_a_1, season, demandKw, touRatios);
     }
     // fallback
     return seasonalFlatBill(kwh, EUL_SMALL.low, season, demandKw);
@@ -852,8 +867,8 @@ const TARIFF = (function() {
     return Math.round(baseWon * 0.002 * diff);
   }
 
-  function finalBill(kwh, ctKey, month, demandKw, climateRate, fuelRate, welfareType, pf) {
-    const elec = calcElec(kwh, ctKey, month, demandKw || 0);
+  function finalBill(kwh, ctKey, month, demandKw, climateRate, fuelRate, welfareType, pf, touRatios) {
+    const elec = calcElec(kwh, ctKey, month, demandKw || 0, touRatios);
     const isResidential = ctKey.startsWith("res");
     const pfAdj = (!isResidential && pf) ? calcPfAdjustment(elec.base_won, pf) : 0;
     const climateWon = Math.round(climateRate * kwh);
@@ -1024,7 +1039,7 @@ const CustomerView = (function() {
     if (!ctxRow) { el("customer-kpis").innerHTML = '<div class="col-12 text-secondary">선택 조합에 데이터 없음</div>'; return; }
 
     // find prediction
-    const predRow = DATA.preds.find(r => r.customer_id === cust && r.year_month === ym && r.horizon_days === hz && r.model === "partial_linear");
+    const predRow = DATA.preds.find(r => r.customer_id === cust && r.year_month === ym && r.horizon_days === hz && (!r.model || r.model === "lightgbm" || r.model === "partial_linear"));
     const predKwh = predRow ? predRow.pred_monthly_kwh : null;
 
     const prev = ctxRow.prev_month_kwh;
@@ -1120,7 +1135,7 @@ const CustomerView = (function() {
     if (!allMonthly.length) return;
 
     // 이 고객의 전체 예측 데이터 (partial_linear, 선택된 horizon)
-    const allPreds = DATA.preds.filter(r => r.customer_id === cust && r.model === "partial_linear" && r.horizon_days === hz);
+    const allPreds = DATA.preds.filter(r => r.customer_id === cust && (!r.model || r.model === "lightgbm" || r.model === "partial_linear") && r.horizon_days === hz);
 
     // 최근 12개월 실측 + 예측이 있는 월만 표시
     const recent = allMonthly.slice(-12);
@@ -1307,9 +1322,17 @@ const TariffView = (function() {
     };
   }
 
+  function getTouRatios(custId, ym) {
+    if (!DATA.tou_breakdown) return null;
+    const row = DATA.tou_breakdown.find(r => r.customer_id === custId && r.year_month === ym);
+    if (!row) return null;
+    return {off: row.tou_off_ratio, mid: row.tou_mid_ratio, on: row.tou_on_ratio};
+  }
+
   function render() {
     const inp = getInputs();
-    const bill = TARIFF.finalBill(inp.kwh, inp.ct, inp.month, inp.demand, inp.climate, inp.fuel, inp.welfare, inp.pf);
+    const touR = getTouRatios(inp.cust, inp.month ? "2024-" + String(inp.month).padStart(2,"0") : null);
+    const bill = TARIFF.finalBill(inp.kwh, inp.ct, inp.month, inp.demand, inp.climate, inp.fuel, inp.welfare, inp.pf, touR);
 
     // KPIs
     const surcharge = bill.climate_won + bill.fuel_won;
@@ -1330,6 +1353,17 @@ const TariffView = (function() {
       ["&#9312; 기본요금", fmt(bill.base_won) + "원", ctLabel],
       ["&#9313; 전력량요금", fmt(bill.energy_won) + "원", bill.effective_rate ? "실효 " + bill.effective_rate + "원/kWh" : ""],
     ];
+    if (bill.tou_detail) {
+      const td = bill.tou_detail;
+      rows.push(["&nbsp;&nbsp;경부하", fmt(td.off.won) + "원", fmt(td.off.kwh) + "kWh × " + td.off.rate + "원"]);
+      rows.push(["&nbsp;&nbsp;중간부하", fmt(td.mid.won) + "원", fmt(td.mid.kwh) + "kWh × " + td.mid.rate + "원"]);
+      rows.push(["&nbsp;&nbsp;최대부하", fmt(td.on.won) + "원", fmt(td.on.kwh) + "kWh × " + td.on.rate + "원"]);
+      if (bill.tou_saving > 0) {
+        rows.push(["&nbsp;&nbsp;<span style='color:var(--accent-green)'>TOU 절감</span>",
+          "<span style='color:var(--accent-green)'>-" + fmt(bill.tou_saving) + "원</span>",
+          "전량 최대부하 대비"]);
+      }
+    }
     if (bill.pf_adjustment && bill.pf_adjustment !== 0) {
       const pfSign = bill.pf_adjustment > 0 ? "할인 -" : "할증 +";
       rows.push(["&#9314; 역률 조정", pfSign + fmt(Math.abs(bill.pf_adjustment)) + "원",
@@ -1410,7 +1444,7 @@ function _disabled() {
     let predRow = null, latestYm = null;
     for (let i = custMonthly.length - 1; i >= 0; i--) {
       const ym = custMonthly[i].year_month;
-      predRow = DATA.preds.find(r => r.customer_id === cust && r.year_month === ym && r.model === "partial_linear" && r.horizon_days === 20);
+      predRow = DATA.preds.find(r => r.customer_id === cust && r.year_month === ym && (!r.model || r.model === "lightgbm" || r.model === "partial_linear") && r.horizon_days === 20);
       if (predRow && predRow.pred_monthly_kwh != null) { latestYm = ym; break; }
     }
     if (!predRow || !latestYm) { el("report-cards").innerHTML = '<div class="text-secondary">예측 데이터 없음</div>'; return; }

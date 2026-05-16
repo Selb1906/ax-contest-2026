@@ -17,7 +17,10 @@ from pathlib import Path
 sys.stdout = _stdio.TextIOWrapper(
     sys.stdout.buffer, encoding="utf-8", line_buffering=True
 )
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_PROJECT_ROOT))
+os.chdir(_PROJECT_ROOT)
 
 import numpy as np
 import pandas as pd
@@ -27,22 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
-# ─────────────────────────────────────────────
-# 한글 폰트 설정
-# ─────────────────────────────────────────────
-_FONT_SET = False
-for _font in ["Malgun Gothic", "NanumGothic", "NanumBarunGothic",
-               "AppleGothic", "DejaVu Sans"]:
-    try:
-        matplotlib.rcParams["font.family"] = _font
-        fig, ax = plt.subplots(figsize=(1, 1))
-        ax.text(0.5, 0.5, "테스트")
-        fig.canvas.draw()
-        plt.close(fig)
-        _FONT_SET = True
-        break
-    except Exception:
-        continue
+matplotlib.rcParams["font.family"] = "DejaVu Sans"
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 # ─────────────────────────────────────────────
@@ -65,21 +53,21 @@ COLORS = {
     "horizon_20": "#DC2626",
 }
 SEASON_COLORS = {
-    "봄": "#22C55E",
-    "여름": "#EF4444",
-    "가을": "#F59E0B",
-    "겨울": "#3B82F6",
+    "Spring": "#22C55E",
+    "Summer": "#EF4444",
+    "Fall": "#F59E0B",
+    "Winter": "#3B82F6",
 }
 
 
 def _month_to_season(m: int) -> str:
     if m in (3, 4, 5):
-        return "봄"
+        return "Spring"
     if m in (6, 7, 8):
-        return "여름"
+        return "Summer"
     if m in (9, 10, 11):
-        return "가을"
-    return "겨울"
+        return "Fall"
+    return "Winter"
 
 
 def _savefig(fig: plt.Figure, name: str) -> None:
@@ -161,7 +149,7 @@ def fig01_model_comparison():
                 vals.append(float(row[metric].iloc[0]) if len(row) > 0 else 0)
             offset = (i - (n_horizons - 1) / 2) * bar_width
             color = COLORS["horizon_10"] if h == 10 else COLORS["horizon_20"]
-            bars = ax.bar(x + offset, vals, bar_width * 0.9, label=f"+{h}일",
+            bars = ax.bar(x + offset, vals, bar_width * 0.9, label=f"+{h}d",
                           color=color, alpha=0.85, edgecolor="white", linewidth=0.5)
             for bar, v in zip(bars, vals):
                 ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(),
@@ -176,7 +164,7 @@ def fig01_model_comparison():
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    fig.suptitle("모델별 성능 비교", fontsize=14, fontweight="bold", y=1.02)
+    fig.suptitle("Model Performance Comparison", fontsize=14, fontweight="bold", y=1.02)
     fig.tight_layout()
     _savefig(fig, "fig01_model_comparison")
 
@@ -188,7 +176,9 @@ def fig02_pred_vs_actual():
     """checkpoints/lgbm_preds.csv + data/ui/ctx.parquet => scatter."""
     print("  [2/10] 예측 vs 실측 산점도")
 
-    preds = _safe_read_csv(ROOT / "checkpoints" / "lgbm_preds.csv")
+    preds = _safe_read_parquet(ROOT / "data" / "ui" / "preds.parquet")
+    if preds is None:
+        preds = _safe_read_csv(ROOT / "checkpoints" / "lgbm_preds.csv")
     if preds is None:
         preds = _safe_read_parquet(ROOT / "checkpoints" / "lgbm_preds.parquet")
     ctx = _safe_read_parquet(ROOT / "data" / "ui" / "ctx.parquet")
@@ -236,7 +226,7 @@ def fig02_pred_vs_actual():
             hmask = h_vals == h
             color = COLORS["horizon_10"] if h == 10 else COLORS["horizon_20"]
             ax.scatter(actual[hmask], predicted[hmask], s=8, alpha=0.3,
-                       color=color, label=f"+{h}일", rasterized=True)
+                       color=color, label=f"+{h}d", rasterized=True)
     else:
         ax.scatter(actual, predicted, s=8, alpha=0.3, color=COLORS["primary"], rasterized=True)
 
@@ -247,9 +237,9 @@ def fig02_pred_vs_actual():
     ax.plot([lo - margin, hi + margin], [lo - margin, hi + margin],
             "k--", linewidth=1, alpha=0.7, label="y = x")
 
-    ax.set_xlabel("실측 월 사용량 (kWh)", fontsize=11)
-    ax.set_ylabel("예측 월 사용량 (kWh)", fontsize=11)
-    ax.set_title(f"예측 vs 실측 산점도  (R² = {r2:.4f}, n = {len(actual):,})",
+    ax.set_xlabel("Actual Monthly Usage (kWh)", fontsize=11)
+    ax.set_ylabel("Predicted Monthly Usage (kWh)", fontsize=11)
+    ax.set_title(f"Predicted vs Actual  (R² = {r2:.4f}, n = {len(actual):,})",
                  fontsize=13, fontweight="bold")
     ax.legend(fontsize=9, loc="upper left")
     ax.set_aspect("equal", adjustable="datalim")
@@ -267,7 +257,9 @@ def fig03_residual_histogram():
     """(predicted - actual) 분포 히스토그램."""
     print("  [3/10] 잔차 분포 히스토그램")
 
-    preds = _safe_read_csv(ROOT / "checkpoints" / "lgbm_preds.csv")
+    preds = _safe_read_parquet(ROOT / "data" / "ui" / "preds.parquet")
+    if preds is None:
+        preds = _safe_read_csv(ROOT / "checkpoints" / "lgbm_preds.csv")
     if preds is None:
         preds = _safe_read_parquet(ROOT / "checkpoints" / "lgbm_preds.parquet")
     ctx = _safe_read_parquet(ROOT / "data" / "ui" / "ctx.parquet")
@@ -306,16 +298,16 @@ def fig03_residual_histogram():
 
     # 평균선
     ax.axvline(mu, color=COLORS["secondary"], linewidth=2, linestyle="-",
-               label=f"평균 = {mu:.1f} kWh")
+               label=f"Mean = {mu:.1f} kWh")
     # +/- sigma
     ax.axvline(mu + sigma, color=COLORS["warm"], linewidth=1.5, linestyle="--",
                label=f"+1$\\sigma$ = {mu + sigma:.1f}")
     ax.axvline(mu - sigma, color=COLORS["warm"], linewidth=1.5, linestyle="--",
                label=f"$-$1$\\sigma$ = {mu - sigma:.1f}")
 
-    ax.set_xlabel("잔차 (예측 - 실측, kWh)", fontsize=11)
-    ax.set_ylabel("확률 밀도", fontsize=11)
-    ax.set_title(f"잔차 분포  ($\\mu$={mu:.1f}, $\\sigma$={sigma:.1f}, n={len(residuals):,})",
+    ax.set_xlabel("Residual (Predicted - Actual, kWh)", fontsize=11)
+    ax.set_ylabel("Density", fontsize=11)
+    ax.set_title(f"Residual Distribution  ($\\mu$={mu:.1f}, $\\sigma$={sigma:.1f}, n={len(residuals):,})",
                  fontsize=13, fontweight="bold")
     ax.legend(fontsize=9)
     ax.grid(axis="y", alpha=0.2, linestyle="--")
@@ -371,9 +363,9 @@ def fig04_monthly_error_boxplot():
         patch.set_alpha(0.7)
 
     ax.set_xticks(range(len(months)))
-    ax.set_xticklabels([f"{m}월" for m in months], fontsize=9)
+    ax.set_xticklabels([f"M{m}" for m in months], fontsize=9)
     ax.set_ylabel("MAPE (%)", fontsize=11)
-    ax.set_title("월별 예측 오차 분포 (Sliding 평가)", fontsize=13, fontweight="bold")
+    ax.set_title("Monthly Error Distribution (Sliding Eval)", fontsize=13, fontweight="bold")
     ax.grid(axis="y", alpha=0.2, linestyle="--")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -422,8 +414,8 @@ def fig05_ablation_waterfall():
 
     ax.set_yticks(range(len(groups)))
     ax.set_yticklabels(groups, fontsize=10)
-    ax.set_xlabel("MAPE 변화 (%p, 제거 시)", fontsize=11)
-    ax.set_title("피처 그룹별 기여도 (Ablation)", fontsize=13, fontweight="bold")
+    ax.set_xlabel("MAPE Change (%p, when removed)", fontsize=11)
+    ax.set_title("Feature Group Contribution (Ablation)", fontsize=13, fontweight="bold")
     ax.axvline(0, color="black", linewidth=0.8)
     ax.grid(axis="x", alpha=0.2, linestyle="--")
     ax.spines["top"].set_visible(False)
@@ -433,8 +425,8 @@ def fig05_ablation_waterfall():
     # 범례
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor=COLORS["secondary"], alpha=0.8, label="제거 시 악화 (기여 있음)"),
-        Patch(facecolor=COLORS["accent"], alpha=0.8, label="제거 시 개선 (기여 없음)"),
+        Patch(facecolor=COLORS["secondary"], alpha=0.8, label="Degrades when removed"),
+        Patch(facecolor=COLORS["accent"], alpha=0.8, label="Improves when removed"),
     ]
     ax.legend(handles=legend_elements, fontsize=9, loc="lower right")
 
@@ -536,7 +528,7 @@ def fig06_learning_curve():
 
     ax.set_xlabel("Iteration", fontsize=11)
     ax.set_ylabel(metric_name, fontsize=11)
-    ax.set_title(f"LightGBM 학습 곡선 ({metric_name})", fontsize=13, fontweight="bold")
+    ax.set_title(f"LightGBM Learning Curve ({metric_name})", fontsize=13, fontweight="bold")
     ax.legend(fontsize=10)
     ax.grid(alpha=0.2, linestyle="--")
     ax.spines["top"].set_visible(False)
@@ -600,9 +592,9 @@ def fig07_precision_recall():
         ax.scatter(prec[mask], rec[mask], s=80, marker=marker, color=color,
                    edgecolors="white", linewidth=0.5, label=m, zorder=5)
 
-    ax.set_xlabel("Precision (정밀도)", fontsize=11)
-    ax.set_ylabel("Recall (재현율)", fontsize=11)
-    ax.set_title("알림 정밀도 vs 재현율 (F1 등고선)", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Precision", fontsize=11)
+    ax.set_ylabel("Recall", fontsize=11)
+    ax.set_title("Alarm Precision vs Recall (F1 Contour)", fontsize=13, fontweight="bold")
     ax.set_xlim(-0.05, 1.05)
     ax.set_ylim(-0.05, 1.05)
     ax.legend(fontsize=9, loc="lower left", framealpha=0.9)
@@ -685,7 +677,7 @@ def fig08_weather_response():
         x, y = x[mask], y[mask]
 
         if len(x) < 5:
-            ax.text(0.5, 0.5, "데이터 부족", transform=ax.transAxes, ha="center")
+            ax.text(0.5, 0.5, "Insufficient data", transform=ax.transAxes, ha="center")
             continue
 
         ax.scatter(x, y, s=10, alpha=0.3, color=color, rasterized=True)
@@ -704,13 +696,13 @@ def fig08_weather_response():
                 bbox=dict(boxstyle="round", fc="white", ec=COLORS["gray"], alpha=0.9))
 
         ax.set_xlabel(label, fontsize=11)
-        ax.set_ylabel("월 사용량 (kWh)", fontsize=11)
+        ax.set_ylabel("Monthly Usage (kWh)", fontsize=11)
         ax.legend(fontsize=9)
         ax.grid(alpha=0.2, linestyle="--")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
-    fig.suptitle("기상 변수 반응 곡선", fontsize=14, fontweight="bold", y=1.02)
+    fig.suptitle("Weather Variable Response", fontsize=14, fontweight="bold", y=1.02)
     fig.tight_layout()
     _savefig(fig, "fig08_weather_response")
 
@@ -754,8 +746,8 @@ def fig09_hourly_load_profile():
                                   alpha=0.8, edgecolor="white")
                     ax.set_xticks(range(len(ct_agg)))
                     ax.set_xticklabels(ct_agg["contract_type"], fontsize=9, rotation=15)
-                    ax.set_ylabel("일 평균 사용량 (kWh)", fontsize=11)
-                    ax.set_title("계약종별 일 평균 전력사용량", fontsize=13, fontweight="bold")
+                    ax.set_ylabel("Avg Daily Usage (kWh)", fontsize=11)
+                    ax.set_title("Daily Usage by Contract Type", fontsize=13, fontweight="bold")
                     ax.grid(axis="y", alpha=0.2, linestyle="--")
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
@@ -800,9 +792,9 @@ def fig09_hourly_load_profile():
         ax.plot(hourly_avg.index, hourly_avg.values, "-o", markersize=4,
                 linewidth=2, color=COLORS["primary"], alpha=0.85)
 
-    ax.set_xlabel("시간 (시)", fontsize=11)
-    ax.set_ylabel("평균 전력사용량 (kWh)", fontsize=11)
-    ax.set_title("시간대별 평균 부하 프로파일", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Hour", fontsize=11)
+    ax.set_ylabel("Avg Usage (kWh)", fontsize=11)
+    ax.set_title("Hourly Load Profile", fontsize=13, fontweight="bold")
     ax.set_xticks(range(24))
     if ct_col:
         ax.legend(fontsize=9)
@@ -811,9 +803,9 @@ def fig09_hourly_load_profile():
     ax.spines["right"].set_visible(False)
 
     # 피크/오프피크 영역 표시
-    ax.axvspan(10, 17, alpha=0.05, color=COLORS["secondary"], label="피크 시간대")
+    ax.axvspan(10, 17, alpha=0.05, color=COLORS["secondary"], label="On-peak")
     ax.axvspan(23, 24, alpha=0.05, color=COLORS["primary"])
-    ax.axvspan(0, 9, alpha=0.05, color=COLORS["primary"], label="경부하 시간대")
+    ax.axvspan(0, 9, alpha=0.05, color=COLORS["primary"], label="Off-peak")
 
     _savefig(fig, "fig09_hourly_load_profile")
 
@@ -862,9 +854,9 @@ def fig10_mape_heatmap():
     ax.set_yticks(range(len(pivot.index)))
     ax.set_yticklabels([str(idx) for idx in pivot.index], fontsize=8)
 
-    ax.set_xlabel("검침일", fontsize=11)
-    ax.set_ylabel("연월", fontsize=11)
-    ax.set_title("검침일별 MAPE 히트맵 (%)", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Meter Day", fontsize=11)
+    ax.set_ylabel("Year-Month", fontsize=11)
+    ax.set_title("MAPE Heatmap by Meter Day (%)", fontsize=13, fontweight="bold")
 
     # 컬러바
     cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)

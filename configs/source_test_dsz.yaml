@@ -1,0 +1,20 @@
+source:
+  kind: dsz_lp
+  path: data/synth/test_dsz.csv
+  column_map:
+    customer_id: "계약번호"
+    ts_date: "검침년월일"
+    ts_time: "검침시분"
+    contract_type: "계약종별"
+    p_active_kwh: "유효전력량계"
+    p_reactive_lag: "지상무효전력량계"
+    p_reactive_lead: "진상무효전력량계"
+    p_apparent_kwh: "피상전력량계"
+    contract_power_kw: "계약전력"
+    region_code: "본부"
+    region_sub: "지사"
+    industry_code: "산업분류"
+    supply_method: "공급방식"
+    usage_purpose: "전기사용용도"
+    meter_interval: "검침주기"
+  contract_type_default: null

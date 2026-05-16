@@ -1,0 +1,433 @@
+[준비] 라이브러리 로딩 중...
+  numpy... OK
+  pandas... OK
+  src.io_adapter... OK
+  src.btm_detect... OK
+  src.models.lgbm... OK
+  src.models.explain... OK
+  src.preprocess... OK (1.5초)
+
+╔══════════════════════════════════════════════════════╗
+║         전체 분석 파이프라인 시작                      ║
+╚══════════════════════════════════════════════════════╝
+  소스: configs/source_test_dsz.yaml
+  학습 종료: None
+  검침일: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+  체크포인트: checkpoints/ (새로 실행)
+
+[전처리 결과 감지] data\preprocessed/ → 즉시 로드
+
+============================================================
+[START] step1_load
+============================================================
+  daily.parquet 로딩... OK (0.1초, 109,600행)
+  ami_features.parquet 로딩... OK (3,096행)
+  customer_info.parquet 로딩... OK (86행)
+  [0.1s] 전처리 parquet 로드 완료 (검증 통과)
+  [0.1s] rows=109,600  customers=86
+  [0.1s] columns: ['customer_id', 'date', 'contract_type', 'day_kwh', 'day_reactive_lag', 'day_reactive_lead', 'day_apparent_kwh', 'n_intervals', 'temp_c', 'ts', 'p_active_kwh', 'p_reactive_kwh', 'contract_type_cust', 'contract_power_kw', 'region_code', 'region_sub', 'supply_method', 'usage_purpose', 'industry_code']
+  [0.1s] ts: 2022-01-01 00:00:00 ~ 2024-12-31 00:00:00
+[DONE] step1_load — 0.1s
+
+============================================================
+[START] step2_btm
+============================================================
+  [BTM 신호] 15분 데이터 기반 — 역송 5명, 낮저사용 6명
+  [0.0s] BTM: 5명 (역송 5 + 낮저사용 6)
+[DONE] step2_btm — 0.0s
+  BTM 피처 병합 완료 (is_btm=10960명)
+
+============================================================
+[START] step1_5_preprocess
+============================================================
+E:\AX_Contest\src\preprocess.py:123: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  df = df.groupby(CUSTOMER_ID, observed=True, group_keys=False).apply(_iqr_filter)
+  [0.2s] remove_duplicates: 15344건 중복 제거
+  [0.2s] remove_outliers: method=iqr, removed=0
+  [0.2s] 최종: 109,600 → 94,256 (14.00% 제거)
+[DONE] step1_5_preprocess — 0.2s
+
+============================================================
+[START] step3_profiler
+  대상: 19건
+============================================================
+  [ok] schema                         0.1s  profile_stats\dsz\00_schema.json
+  [ok] coverage                       0.0s  profile_stats\dsz\01_coverage.json
+  [ok] customer_counts                0.0s  profile_stats\dsz\02_customer_counts.json
+  [ok] load_distribution              0.0s  profile_stats\dsz\03_load_distribution.csv
+  [ok] hourly_profile                 0.0s  profile_stats\dsz\04_hourly_profile.csv
+  [ok] weekly_profile                 0.0s  profile_stats\dsz\05_weekly_profile.csv
+  [ok] monthly_profile                0.1s  profile_stats\dsz\06_monthly_profile.csv
+  [ok] seasonality_pivot              0.0s  profile_stats\dsz\07_seasonality_*.csv
+  [ok] power_factor                   0.0s  profile_stats\dsz\08_power_factor.json
+  [ok] max_demand_ratio               0.0s  
+  [ok] alarm_base_rates               0.0s  profile_stats\dsz\10_alarm_base_rates.json
+  [ok] data_quality                   0.1s  profile_stats\dsz\12_data_quality.json
+  [ok] weather_regression             0.0s  profile_stats\dsz\13_weather_regression.csv
+  [ok] partial_month_correlation      0.1s  profile_stats\dsz\14_partial_month_correlation.json
+  [ok] partial_month_stability        2.5s  profile_stats\dsz\18_partial_month_stability.json
+  [ok] tou_profile                    0.1s  profile_stats\dsz\15_tou_profile.csv
+  [holidays] parquet 캐시 로드: dsz_bundle\external_data\holidays_kr.parquet
+  [ok] tou_usage_ratios               0.1s  profile_stats\dsz\16_tou_usage_ratios.csv
+  [ok] correlation_matrix             0.7s  profile_stats\dsz\17_correlation_matrix.csv
+[done] 18 ok, 0 failed, 3.9s, manifest=profile_stats\dsz\MANIFEST.json
+
+[DONE] step3_profiler — 3.9s
+
+============================================================
+[START] step4_baselines
+  대상: 5건
+============================================================
+  [██████░░░░░░░░░░░░░░░░░░░░░░░░]  20.0% (1/5) | 0s elapsed | ETA 1s | naive_last_month: MAPE 7.43%  [████████████░░░░░░░░░░░░░░░░░░]  40.0% (2/5) | 1s elapsed | ETA 1s | seasonal_yoy: MAPE 1.48%  [██████████████████░░░░░░░░░░░░]  60.0% (3/5) | 1s elapsed | ETA 1s | moving_avg3: MAPE 9.09%  [████████████████████████░░░░░░]  80.0% (4/5) | 1s elapsed | ETA 0s | partial_linear: MAPE 2.35%  [██████████████████████████████] 100.0% (5/5) | 1s elapsed | ETA 0s | partial_seasonal_yoy: MAPE 1.21%
+[DONE] step4_baselines — 1.4s
+
+============================================================
+[START] step4_5_split
+============================================================
+E:\AX_Contest\src\models\lgbm.py:292: RuntimeWarning: Mean of empty slice
+  np.nanmean([mlook.get((c, ym - k), np.nan) for k in (1, 2, 3)])
+  [AMI] 일별 데이터 감지 → AMI 피처 산출 불가, 스킵
+  [holidays] parquet 캐시 로드: dsz_bundle\external_data\holidays_kr.parquet
+  [피처] region_code: 9종 카테고리 추가
+  [피처] supply_method: 3종 카테고리 추가
+  [피처] usage_purpose: 7종 카테고리 추가
+  [피처] industry_code: 7종 카테고리 추가
+  [AMI 피처 조인] 13개 피처 추가
+  [기상] 본부→관측소 매핑: 86/86고객
+  [기상 피처 조인] 고객별 관측소 매핑 → 16개 컬럼 추가
+  [0.9s] 피처: 42개, 행: 6,192
+  데이터 36개월 → train ~18m, val ~6m, test ~12m
+  분할: train=3,096 val=1,032 test=2,064
+  ✅ 누수 체크 통과
+  [0.9s] 누수 체크 통과
+[DONE] step4_5_split — 0.9s
+
+============================================================
+[START] step5_lgbm
+============================================================
+  [0.0s] train=3,096  test=3,096  train_end=2023-06
+[lgbm] train=3,096  test=3,096  train_end=2023-06  features=42
+[50]	train's mape: 0.1842	valid's mape: 0.181397
+[100]	train's mape: 0.0285953	valid's mape: 0.0363398
+[150]	train's mape: 0.0171456	valid's mape: 0.030101
+[200]	train's mape: 0.0149467	valid's mape: 0.029593
+[250]	train's mape: 0.0135297	valid's mape: 0.0293844
+[300]	train's mape: 0.012389	valid's mape: 0.0289991
+[350]	train's mape: 0.01159	valid's mape: 0.0287805
+[400]	train's mape: 0.0109139	valid's mape: 0.0286906
+  [0.7s] lightgbm: +10d 3.28%, +10d 3.88%, +20d 2.19%, +20d 3.25%
+[DONE] step5_lgbm — 0.8s
+
+============================================================
+[START] step5_5_sliding
+  대상: 6건
+============================================================
+  [█████░░░░░░░░░░░░░░░░░░░░░░░░░]  16.7% (1/6) | 1s elapsed | ETA 4s | 검침일=1: MAPE 3.050%, 2064건  [██████████░░░░░░░░░░░░░░░░░░░░]  33.3% (2/6) | 2s elapsed | ETA 3s | 검침일=5: MAPE 5.160%, 2064건  [███████████████░░░░░░░░░░░░░░░]  50.0% (3/6) | 2s elapsed | ETA 2s | 검침일=10: MAPE 7.221%, 2064건  [████████████████████░░░░░░░░░░]  66.7% (4/6) | 3s elapsed | ETA 2s | 검침일=15: MAPE 11.463%, 2064건  [█████████████████████████░░░░░]  83.3% (5/6) | 4s elapsed | ETA 1s | 검침일=20: MAPE 20.717%, 2064건  [██████████████████████████████] 100.0% (6/6) | 5s elapsed | ETA 0s | 검침일=25: MAPE 39.688%, 2064건  [holidays] parquet 캐시 로드: dsz_bundle\external_data\holidays_kr.parquet
+
+  오차 큰 날짜 (상위 5):
+    2024-12 md=25: MAPE 416.00%  n=172
+    2024-12 md=20: MAPE 186.33%  n=172
+    2024-12 md=15: MAPE 92.44%  n=172
+    2024-12 md=10: MAPE 45.17%  n=172
+    2024-12 md=5: MAPE 19.15%  n=172
+  오차 작은 날짜 (하위 5):
+    2024-01 md=1: MAPE 1.45%  n=172
+    2024-01 md=15: MAPE 1.47%  n=172
+    2024-01 md=10: MAPE 1.47%  n=172
+    2024-02 md=10: MAPE 1.74%  n=172
+    2024-02 md=20: MAPE 2.01%  n=172
+
+  Sliding 평가 요약:
+    MAPE:     14.550%
+    RMSE:     494.78
+    NRMSE:    23.771%
+    CVRMSE:   23.771%
+    MAE:      158.57
+    Bias:     +89.10
+    Std(err): 486.69
+    N:        12,384.0
+
+[DONE] step5_5_sliding — 5.5s
+
+============================================================
+[START] step6_shap
+============================================================
+  [0.0s] SHAP 산출 중... (시간 소요)
+[shap] computing SHAP values...
+  shap_global.csv — top 5: ['partial_rate', 'ma3_kwh', 'days_in_month', 'partial_kwh', 'customer_mean_history']
+  shap_summary.png
+  dependence plots: 5
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 45453 (\N{HANGUL SYLLABLE NONG}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50629 (\N{HANGUL SYLLABLE EOB}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 51076 (\N{HANGUL SYLLABLE IM}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 48143 (\N{HANGUL SYLLABLE MIC}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50612 (\N{HANGUL SYLLABLE EO}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 45453 (\N{HANGUL SYLLABLE NONG}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50629 (\N{HANGUL SYLLABLE EOB}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 51076 (\N{HANGUL SYLLABLE IM}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 48143 (\N{HANGUL SYLLABLE MIC}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50612 (\N{HANGUL SYLLABLE EO}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 45453 (\N{HANGUL SYLLABLE NONG}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50629 (\N{HANGUL SYLLABLE EOB}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 51076 (\N{HANGUL SYLLABLE IM}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 48143 (\N{HANGUL SYLLABLE MIC}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50612 (\N{HANGUL SYLLABLE EO}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 45453 (\N{HANGUL SYLLABLE NONG}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50629 (\N{HANGUL SYLLABLE EOB}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 51076 (\N{HANGUL SYLLABLE IM}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 48143 (\N{HANGUL SYLLABLE MIC}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+E:\AX_Contest\src\models\explain.py:143: UserWarning: Glyph 50612 (\N{HANGUL SYLLABLE EO}) missing from font(s) DejaVu Sans.
+  plt.savefig(p, dpi=150, bbox_inches="tight")
+  waterfall examples: 5
+  feature_correlation.csv + correlation_heatmap.png
+  [6.0s] 산출물: ['global_importance', 'summary_plot', 'dependence_plots', 'waterfall_examples', 'correlation_matrix', 'correlation_heatmap']
+[DONE] step6_shap — 6.0s
+
+============================================================
+[START] step7_weather_opt
+============================================================
+  [0.0s] ASOS 로드 중...
+  [ASOS] parquet 캐시 로드: ASOS\asos_all.parquet
+  [0.3s] 최적화 실행 중 (test 제외, ~2023-12)...
+[optimize] 방법 1: LP 기반 가중치 역산...
+  cooling R²=-209.0204136259465
+  heating R²=-178.94536991410413
+[optimize] 방법 2: 계절별 가중치...
+  summer: R²=N/A
+  winter: R²=N/A
+  spring_fall: R²=-363.71100022197174
+[optimize] 방법 4: 기준온도 최적화...
+  주택용: HDD base=20.0°C, CDD base=27.0°C, R²=0.0654
+  전체: HDD base=20.0°C, CDD base=21.0°C, R²=0.0016
+
+[saved] weather_opt\weather_optimization.json
+[DONE] step7_weather_opt — 7.9s
+
+============================================================
+[START] step8_sensitivity
+============================================================
+  [0.0s] 기온 민감도...
+  [0.1s]   temp -5°C: MAPE 3.055%
+  [0.2s]   temp -3°C: MAPE 3.069%
+  [0.2s]   temp -2°C: MAPE 3.088%
+  [0.3s]   temp -1°C: MAPE 3.051%
+  [0.3s]   temp +1°C: MAPE 3.438%
+  [0.4s]   temp +2°C: MAPE 3.460%
+  [0.4s]   temp +3°C: MAPE 3.463%
+  [0.5s]   temp +5°C: MAPE 3.533%
+  [0.5s] 강수 민감도...
+  [0.5s]   rain ×0.55: MAPE 2.849%
+  [0.5s]   rain ×0.80: MAPE 2.864%
+  [0.6s]   rain ×1.20: MAPE 2.870%
+  [0.6s]   rain ×1.45: MAPE 2.861%
+  [0.6s] 일사 민감도...
+  [0.7s]   solar ×0.5: MAPE 2.863%
+  [0.7s]   solar ×0.7: MAPE 2.847%
+  [0.8s]   solar ×1.3: MAPE 2.981%
+  [0.8s]   solar ×1.5: MAPE 2.975%
+  [0.8s] 민감도 분석 완료: 17개 실험
+[DONE] step8_sensitivity — 0.8s
+
+============================================================
+[START] step10_ablation
+============================================================
+  [0.0s] Ablation Study 실행 중...
+  [328.3s] 최적 설정: {'btm_mode': 'score', 'weather_version': 'none', 'hdd_base': 15.0, 'cdd_base': 24.0, 'feature_selection': False}
+[DONE] step10_ablation — 328.3s
+
+============================================================
+[START] step11_retrain_optimal
+============================================================
+  [0.0s] 최적 설정으로 재학습 중...
+  [0.0s] 피처 선택 OFF — 전체 피처 유지
+[lgbm] train=4,128  test=2,064  train_end=2023-12  features=42
+[50]	train's mape: 0.186134	valid's mape: 0.185131
+[100]	train's mape: 0.0292314	valid's mape: 0.0364777
+[150]	train's mape: 0.0171897	valid's mape: 0.0289323
+[200]	train's mape: 0.0146803	valid's mape: 0.0281353
+[250]	train's mape: 0.0134145	valid's mape: 0.0279734
+  [0.6s] 최적 모델 Sliding 재평가 중...
+  [holidays] parquet 캐시 로드: dsz_bundle\external_data\holidays_kr.parquet
+
+  오차 큰 날짜 (상위 5):
+    2024-12 md=31: MAPE 619072.99%  n=164
+    2024-12 md=30: MAPE 2578.37%  n=172
+    2024-12 md=29: MAPE 1592.78%  n=172
+    2024-12 md=28: MAPE 1148.33%  n=172
+    2024-12 md=27: MAPE 749.14%  n=172
+  오차 작은 날짜 (하위 5):
+    2024-01 md=15: MAPE 1.62%  n=172
+    2024-01 md=16: MAPE 1.63%  n=172
+    2024-01 md=1: MAPE 1.64%  n=172
+    2024-01 md=17: MAPE 1.66%  n=172
+    2024-01 md=9: MAPE 1.66%  n=172
+
+  Sliding 평가 요약:
+    MAPE:     1616.165%
+    RMSE:     594.14
+    NRMSE:    28.829%
+    CVRMSE:   28.829%
+    MAE:      174.50
+    Bias:     +99.59
+    Std(err): 585.73
+    N:        63,976.0
+[DONE] step11_retrain_optimal — 27.0s
+
+============================================================
+[START] step11_5_residual
+============================================================
+  [0.0s] 잔차 보정 모델 학습 중...
+  [0.0s] 최적 모델 기반 잔차 보정
+
+  잔차 보정 결과:
+    보정 전: MAPE 2.787%  RMSE 100.38
+    보정 후: MAPE 2.656%  RMSE 101.76
+    개선:    MAPE +0.131%p
+[DONE] step11_5_residual — 0.1s
+
+============================================================
+[START] step12_tuning
+============================================================
+  [0.0s] Optuna 튜닝 시작 (10분 타임아웃)...
+  [59.3s] 튜닝 완료 — weights/dsz_lgbm_tuned/
+[DONE] step12_tuning — 59.3s
+
+============================================================
+[START] step12_5_tuned_sliding
+============================================================
+  [0.1s] 튜닝 모델 Sliding 재평가 중...
+    [DEBUG] tuned spec: 58개, booster: 58
+    [DEBUG] features_cache 로드: 6192행, 63컬럼
+    [DEBUG] test rows: 2064, train_end: 2023-12
+    [DEBUG] predict 성공: 2064건
+    [DEBUG] md=1: ctx 6192행, pred 2064행, merged 2064행
+    [DEBUG] ctx ym: period[M] <PeriodArray>
+['2022-01', '2022-02', '2022-03']
+Length: 3, dtype: period[M]
+    [DEBUG] pred ym: period[M] <PeriodArray>
+['2024-01', '2024-02', '2024-03']
+Length: 3, dtype: period[M]
+    [DEBUG] tuned_sliding 결과: 31개 검침일
+  [holidays] parquet 캐시 로드: dsz_bundle\external_data\holidays_kr.parquet
+
+  오차 큰 날짜 (상위 5):
+    2024-12 md=31: MAPE 603605.55%  n=164
+    2024-12 md=30: MAPE 2523.33%  n=172
+    2024-12 md=29: MAPE 1555.25%  n=172
+    2024-12 md=28: MAPE 1119.97%  n=172
+    2024-12 md=27: MAPE 730.30%  n=172
+  오차 작은 날짜 (하위 5):
+    2024-02 md=6: MAPE 0.91%  n=172
+    2024-02 md=7: MAPE 0.91%  n=172
+    2024-08 md=1: MAPE 0.93%  n=172
+    2024-02 md=5: MAPE 0.93%  n=172
+    2024-05 md=1: MAPE 0.96%  n=172
+
+  Sliding 평가 요약:
+    MAPE:     1575.024%
+    RMSE:     568.04
+    NRMSE:    27.563%
+    CVRMSE:   27.563%
+    MAE:      156.11
+    Bias:     +94.50
+    Std(err): 560.13
+    N:        63,976.0
+[DONE] step12_5_tuned_sliding — 28.9s
+
+============================================================
+[START] step13_scale
+============================================================
+E:\AX_Contest\src\models\lgbm.py:292: RuntimeWarning: Mean of empty slice
+  np.nanmean([mlook.get((c, ym - k), np.nan) for k in (1, 2, 3)])
+  [AMI] 일별 데이터 감지 → AMI 피처 산출 불가, 스킵
+  [holidays] parquet 캐시 로드: dsz_bundle\external_data\holidays_kr.parquet
+  [피처] region_code: 9종 카테고리 추가
+  [피처] supply_method: 3종 카테고리 추가
+  [피처] usage_purpose: 7종 카테고리 추가
+  [피처] industry_code: 7종 카테고리 추가
+  [1.1s] 현재: 86호, 82MB
+  [1.1s] 10,000 customers: ~9.3GB, ~2분
+  [1.1s] 100,000 customers: ~93.2GB, ~17분
+  [1.1s] 1,000,000 customers: ~932.2GB, ~167분
+[DONE] step13_scale — 1.1s
+[UI 데이터 저장] data/ui/ 갱신 완료
+
+[보고서용 이미지 생성]
+  [OK] 이미지 생성 완료
+
+[반출물 수집] export/ 폴더로 복사
+  [OK] 반출물 수집 완료 → export/
+  [OK] 대시보드: dashboard.html (내부용), export/dashboard_safe.html (반출용)
+
+╔══════════════════════════════════════════════════════╗
+║                    전체 완료                          ║
+╚══════════════════════════════════════════════════════╝
+
+  소요 시간: 0.2분
+  체크포인트: checkpoints/
+  결과: OK 15 / FAIL 0 / SKIP 0
+
+============================================================
+파이프라인 완료 요약
+============================================================
+  [OK] step4_baselines                      1초 OK
+  [OK] step4_5_split                        1초 OK
+  [OK] step5_lgbm                           1초 OK
+  [OK] step5_5_sliding                      6초 OK
+  [OK] step6_shap                           8초 OK
+  [OK] step7_weather_opt                    8초 OK
+  [OK] step8_sensitivity                    1초 OK
+  [OK] step10_ablation                    328초 OK
+  [OK] step11_retrain_optimal              27초 OK
+  [OK] step11_5_residual                    0초 OK
+  [OK] step12_tuning                       59초 OK
+  [OK] step12_5_tuned_sliding              29초 OK
+  [OK] step13_scale                         1초 OK
+  [OK] figures_generate                     5초 OK
+  [OK] export_collect                       5초 OK
+============================================================
+  총 소요: 486초 (8.1분)
+
+  반출 대상:
+    profile_stats/dsz/       — 프로파일러 19개 통계
+    preprocess_log/          — 전처리 로그
+    btm_results/             — BTM 탐지 + 전략 비교
+    eval_results/            — 모델 평가 (기본값)
+    sliding_results/         — Sliding 상세 평가 (기본값)
+    sliding_results_optimal/ — Sliding 상세 평가 (최적 조합)
+    sliding_results_tuned/   — Sliding 상세 평가 (튜닝 모델)
+    residual_correction/     — 잔차 보정 결과 + 패턴 분석
+    ablation_results/        — Ablation Study
+    feature_selection/       — 피처 선정 근거
+    weights/dsz_lgbm/        — 기본 모델
+    weights/dsz_lgbm_optimal/ — 최적 조합 모델
+    weights/dsz_lgbm_tuned/  — 튜닝 모델
+    tuning_results/          — 튜닝 이력
+    explain_results/         — SHAP (PNG + CSV)
+    weather_opt/             — 기상 최적화 + 민감도
+    scale_report/            — 스케일 아웃 지표
+
+  반출 불가:
+    btm_results/btm_flags.csv (고객별)
+    checkpoints/ (중간 결과)
+
+[완료 알림] pipeline_done.txt 생성됨

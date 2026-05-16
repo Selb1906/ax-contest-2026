@@ -25,3 +25,11 @@ source:
     meter_interval:  "검침주기"        # 15분 등
 
   contract_type_default: null
+
+  # 본부명 → ASOS 관측소 매핑 오버라이드 (기본 매핑과 다를 때만 지정)
+  # 기본 매핑: src/weather/region_match.py 참조
+  # 예: LP 데이터의 본부명이 코드에 없는 경우 여기에 추가
+  region_station_override:
+    # "실제본부명": 관측소ID
+    # "서울남부본부": 108
+    # "경기동부본부": 119

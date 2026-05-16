@@ -24,7 +24,7 @@ def main() -> int:
     args = ap.parse_args()
 
     print(f"[load] {args.source}")
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
     if "_temp_c" in df.columns and "temp_c" not in df.columns:
         df = df.rename(columns={"_temp_c": "temp_c"})
 

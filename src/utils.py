@@ -42,6 +42,78 @@ def hdd_cdd(
     return hdd, cdd
 
 
+def apply_tmy_remainder(features: pd.DataFrame, weather_version: str) -> pd.DataFrame:
+    """features의 hdd_remainder/cdd_remainder를 TMY 기온으로 교체.
+
+    weather_version: 'tmy_raw', 'tmy_bias', 'tmy_forecast' 중 하나.
+    'regional'이면 경고. TMY인데 적용 실패하면 에러.
+    """
+    if weather_version == "regional":
+        print(f"  [경고] weather_version=regional — remainder에 ASOS 실측 사용 (실 운영 불가)", flush=True)
+        return features
+    if not weather_version.startswith("tmy"):
+        return features
+    if "hdd_remainder" not in features.columns:
+        print(f"  [TMY] hdd_remainder 컬럼 없음 → ASOS 기반으로 먼저 생성 시도", flush=True)
+        # ASOS에서 remainder를 만들 수 없으면 에러
+        if "year_month" not in features.columns:
+            raise RuntimeError(f"[FATAL] TMY 적용 요청({weather_version})인데 hdd_remainder도 year_month도 없음")
+        # TMY로 직접 생성 (ASOS 거치지 않고)
+        _tmy_dir = Path("data/weather") / weather_version
+        if not _tmy_dir.exists():
+            raise RuntimeError(f"[FATAL] TMY 디렉토리 없음: {_tmy_dir}")
+        _csvs = list(_tmy_dir.glob("*.csv"))
+        if not _csvs:
+            raise RuntimeError(f"[FATAL] TMY CSV 없음: {_tmy_dir}")
+        _tmy = pd.concat([pd.read_csv(p) for p in _csvs], ignore_index=True)
+        _tmy["month"] = _tmy["month"].astype(int)
+        _lookup = _tmy.groupby("month")["temp_mean"].mean().to_dict()
+        _m = features["year_month"].apply(lambda x: x.month)
+        _t = _m.map(_lookup)
+        _h, _c = hdd_cdd(_t.values)
+        features = features.copy()
+        features["hdd_remainder"] = _h
+        features["cdd_remainder"] = _c
+        print(f"  [TMY] hdd/cdd_remainder를 TMY에서 직접 생성 ({features['hdd_remainder'].notna().sum()}행)", flush=True)
+        return features
+
+    tmy_dir = Path("data/weather") / weather_version
+    if not tmy_dir.exists():
+        raise RuntimeError(f"[FATAL] TMY 디렉토리 없음: {tmy_dir}")
+
+    csvs = list(tmy_dir.glob("*.csv"))
+    if not csvs:
+        raise RuntimeError(f"[FATAL] TMY CSV 없음: {tmy_dir}")
+    tmy = pd.concat([pd.read_csv(p) for p in csvs], ignore_index=True)
+    if "temp_mean" not in tmy.columns or "month" not in tmy.columns:
+        raise RuntimeError(f"[FATAL] TMY CSV에 temp_mean 또는 month 컬럼 없음")
+
+    tmy["month"] = tmy["month"].astype(int)
+    tmy_lookup = tmy.groupby("month")["temp_mean"].mean().to_dict()
+
+    features = features.copy()
+    _month = features["year_month"].apply(lambda x: x.month)
+    tmy_temp = _month.map(tmy_lookup)
+    mask = tmy_temp.notna()
+    if not mask.any():
+        raise RuntimeError(f"[FATAL] TMY 기온 매핑 결과 전부 NaN — month 매핑 실패")
+    h, c = hdd_cdd(tmy_temp.values)
+    features.loc[mask, "hdd_remainder"] = h[mask]
+    features.loc[mask, "cdd_remainder"] = c[mask]
+    print(f"  [TMY] remainder HDD/CDD를 {weather_version}로 교체 ({mask.sum()}행)", flush=True)
+    return features
+
+
+def load_best_config() -> dict:
+    """ablation_results/best_config.json 로드. 없으면 빈 dict."""
+    p = Path("ablation_results/best_config.json")
+    if not p.exists():
+        return {}
+    import json
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def load_holidays(path: str | Path | None) -> set[pd.Timestamp]:
     """공휴일 CSV → date 집합.
 

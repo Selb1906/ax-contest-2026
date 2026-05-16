@@ -74,3 +74,30 @@ dsz_bundle/code/
 
 # 임시
 _zip_staging*/
+
+# zip 번들
+*.zip
+
+# 전처리 결과 (로컬)
+data/preprocessed/
+data/preprocessed_test/
+checkpoints/
+weights/
+tuning_results/
+residual_correction/
+figures/
+export/
+
+# sliding 결과
+sliding_results*/
+
+# 번들 백업
+dsz_bundle_backup/
+
+# 반출 결과
+SC-2026-*/
+
+# 결과 CSV
+results_combined*.csv
+results_v*.csv
+dsz_bundle/

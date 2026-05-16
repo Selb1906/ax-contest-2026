@@ -30,7 +30,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print("[load] data...")
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
     features, spec = lgbm.build_features(df)
 
     print(f"  rows={len(features):,}  candidate features={len(spec.all)}")

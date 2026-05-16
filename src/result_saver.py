@@ -25,18 +25,7 @@ def _safe_plot_setup():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    for font in ["Malgun Gothic", "NanumGothic", "AppleGothic",
-                  "NanumBarunGothic", "DejaVu Sans"]:
-        try:
-            matplotlib.rcParams["font.family"] = font
-            # 테스트 렌더링
-            fig, ax = plt.subplots(figsize=(1, 1))
-            ax.text(0.5, 0.5, "테스트")
-            fig.canvas.draw()
-            plt.close(fig)
-            break
-        except Exception:
-            continue
+    matplotlib.rcParams["font.family"] = "DejaVu Sans"
     matplotlib.rcParams["axes.unicode_minus"] = False
     matplotlib.rcParams["figure.facecolor"] = "white"
     return matplotlib, plt

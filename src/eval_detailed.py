@@ -13,6 +13,7 @@ import pandas as pd
 from .eval import (
     build_horizon_table, daily_by_customer, monthly_by_customer,
     attach_alarm_context, regression_metrics,
+    alarm_labels, alarm_classification_metrics, AlarmThresholds,
 )
 from .schemas import CUSTOMER_ID, CONTRACT_TYPE
 from .special_days import load_holidays
@@ -81,26 +82,73 @@ def error_by_dimension(
     dict of DataFrames:
       "by_horizon"   — horizon별
       "by_month"     — 월별
+      "by_scale"     — 사용량 규모별 (0-100, 100-1K, 1K-10K, 10K+)
       "by_meter_day" — 검침일별
       "by_contract"  — 계약종별
       "by_special"   — 특수일 여부별 (disruption_ratio 기반)
       "overall"      — 전체 요약
+
+    overall, by_horizon, by_month, by_scale 에는 alarm metrics
+    (precision/recall/f1) 이 함께 포함된다.
     """
     def _agg(group):
         yt = group["full_month_kwh"].values
         yp = group["pred_monthly_kwh"].values
-        return regression_metrics(yt, yp)
+        cids = group["customer_id"].values if "customer_id" in group.columns else None
+        return regression_metrics(yt, yp, customer_ids=cids)
+
+    def _agg_with_alarm(group):
+        cids = group["customer_id"].values if "customer_id" in group.columns else None
+        reg = regression_metrics(
+            group["full_month_kwh"].values,
+            group["pred_monthly_kwh"].values,
+            customer_ids=cids,
+        )
+        th = AlarmThresholds()
+        required = [
+            "pred_monthly_kwh", "prev_month_kwh",
+            "yoy_month_kwh", "ma3_kwh", "full_month_kwh",
+        ]
+        if all(c in group.columns for c in required):
+            try:
+                pred_al = alarm_labels(
+                    group["pred_monthly_kwh"],
+                    group["prev_month_kwh"],
+                    group["yoy_month_kwh"],
+                    group["ma3_kwh"],
+                    th,
+                )
+                true_al = alarm_labels(
+                    group["full_month_kwh"],
+                    group["prev_month_kwh"],
+                    group["yoy_month_kwh"],
+                    group["ma3_kwh"],
+                    th,
+                )
+                al = alarm_classification_metrics(
+                    pred_al["any_of_3"], true_al["any_of_3"],
+                )
+                reg.update({f"alarm_{k}": v for k, v in al.items()})
+                for cond in ["cond_prev", "cond_yoy", "cond_ma"]:
+                    if cond in pred_al.columns and cond in true_al.columns:
+                        al_c = alarm_classification_metrics(
+                            pred_al[cond], true_al[cond],
+                        )
+                        reg.update({f"{cond}_{k}": v for k, v in al_c.items()})
+            except Exception:
+                pass
+        return reg
 
     output = {}
 
     # 전체
-    overall = _agg(results)
+    overall = _agg_with_alarm(results)
     output["overall"] = pd.DataFrame([overall])
 
     # horizon별
     rows = []
     for h, grp in results.groupby("horizon_days"):
-        m = _agg(grp)
+        m = _agg_with_alarm(grp)
         m["horizon_days"] = h
         rows.append(m)
     output["by_horizon"] = pd.DataFrame(rows)
@@ -108,10 +156,73 @@ def error_by_dimension(
     # 월별
     rows = []
     for month, grp in results.groupby("month"):
-        m = _agg(grp)
+        m = _agg_with_alarm(grp)
         m["month"] = month
         rows.append(m)
     output["by_month"] = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+    # 사용량 규모별 (by_scale) — 전체
+    scale_bins = [
+        (0, 100, "0-100"),
+        (100, 1000, "100-1K"),
+        (1000, 10000, "1K-10K"),
+        (10000, float("inf"), "10K+"),
+    ]
+    rows = []
+    for lo, hi, label in scale_bins:
+        mask = (results["full_month_kwh"] >= lo) & (results["full_month_kwh"] < hi)
+        grp = results.loc[mask]
+        if len(grp) == 0:
+            continue
+        m = _agg_with_alarm(grp)
+        m["scale"] = label
+        rows.append(m)
+    output["by_scale"] = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+    # 사용량 규모별 × horizon별 (by_scale_horizon)
+    if "horizon_days" in results.columns:
+        rows = []
+        for lo, hi, label in scale_bins:
+            for h in sorted(results["horizon_days"].unique()):
+                mask = ((results["full_month_kwh"] >= lo)
+                        & (results["full_month_kwh"] < hi)
+                        & (results["horizon_days"] == h))
+                grp = results.loc[mask]
+                if len(grp) == 0:
+                    continue
+                m = _agg_with_alarm(grp)
+                m["scale"] = label
+                m["horizon_days"] = int(h)
+                rows.append(m)
+        output["by_scale_horizon"] = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+    # cold start 여부별 (daily.parquet의 train 기간에 없는 고객)
+    if "customer_id" in results.columns and "year_month" in results.columns:
+        # daily.parquet에서 train 기간 고객 확인
+        from pathlib import Path as _P
+        _daily_p = _P("data/preprocessed/daily.parquet")
+        if _daily_p.exists():
+            _daily = pd.read_parquet(_daily_p, columns=["customer_id", "date"])
+            _daily["date"] = pd.to_datetime(_daily["date"])
+            _daily["year_month"] = _daily["date"].dt.to_period("M")
+            _max_ym = _daily["year_month"].max()
+            _train_end = pd.Period(f"{_max_ym.year - 1}-12", freq="M")
+            early_custs = set(_daily[_daily["year_month"] <= _train_end]["customer_id"].unique())
+        else:
+            all_ym = sorted(results["year_month"].unique())
+            early_custs = set(results["customer_id"].unique())  # daily 없으면 전부 existing
+        results_cs = results.copy()
+        results_cs["is_cold_start"] = ~results_cs["customer_id"].isin(early_custs)
+        rows = []
+        for cs, label in [(False, "existing"), (True, "cold_start")]:
+            grp = results_cs[results_cs["is_cold_start"] == cs]
+            if len(grp) == 0:
+                continue
+            m = _agg_with_alarm(grp)
+            m["cold_start"] = label
+            m["n_customers"] = int(grp["customer_id"].nunique())
+            rows.append(m)
+        output["by_cold_start"] = pd.DataFrame(rows) if rows else pd.DataFrame()
 
     # 검침일별
     if "meter_day" in results.columns:
@@ -203,11 +314,11 @@ def save_detailed_evaluation(
 
         def plot_monthly(fig, ax):
             ax.bar(by_month["month"], by_month["mape_pct"], color="#0984e3", width=0.7)
-            ax.set_xlabel("월")
+            ax.set_xlabel("Month")
             ax.set_ylabel("MAPE (%)")
             ax.set_xticks(range(1, 13))
             ax.grid(axis="y", alpha=0.3)
-        save_chart(plot_monthly, out, "mape_by_month", by_month, "월별 MAPE")
+        save_chart(plot_monthly, out, "mape_by_month", by_month, "MAPE by Month")
 
     # 검침일별 MAPE 차트
     if "by_meter_day" in dims and len(dims["by_meter_day"]) > 0:
@@ -215,10 +326,10 @@ def save_detailed_evaluation(
 
         def plot_meter_day(fig, ax):
             ax.plot(by_md["meter_day"], by_md["mape_pct"], "-o", color="#e17055", markersize=3)
-            ax.set_xlabel("검침일")
+            ax.set_xlabel("Meter Day")
             ax.set_ylabel("MAPE (%)")
             ax.grid(alpha=0.3)
-        save_chart(plot_meter_day, out, "mape_by_meter_day", by_md, "검침일별 MAPE")
+        save_chart(plot_meter_day, out, "mape_by_meter_day", by_md, "MAPE by Meter Day")
 
     # 오차 큰/작은 날짜 (반출 안전 — customer_id 없음)
     if "worst_dates" in dims and len(dims["worst_dates"]) > 0:
@@ -245,5 +356,9 @@ def save_detailed_evaluation(
         print(f"    Bias:     {ov.get('bias', 0):+.2f}")
         print(f"    Std(err): {ov.get('std_error', 0):.2f}")
         print(f"    N:        {ov.get('n', 0):,}")
+        if "alarm_precision" in ov.index:
+            print(f"    Alarm Precision: {ov.get('alarm_precision', 0):.3f}")
+            print(f"    Alarm Recall:    {ov.get('alarm_recall', 0):.3f}")
+            print(f"    Alarm F1:        {ov.get('alarm_f1', 0):.3f}")
 
     return dims

@@ -76,6 +76,57 @@ def main():
             "산업분류": industry[i % len(industry)],
         }
 
+    # BTM 고객 주입 (전체의 ~10%)
+    # 신호 1: 역송전 (음수 유효전력) — 확실한 BTM
+    # 신호 2: 일사량 비례 사용량 감소 — 맑은 날에 낮 사용량이 줄어드는 패턴
+    btm_ids = list(cust_ids)[:max(2, len(cust_ids) // 10)]
+    btm_strong = set(btm_ids[:len(btm_ids) // 2])   # 절반: 역송전까지 발생
+    btm_mild = set(btm_ids[len(btm_ids) // 2:])     # 나머지: 자가소비만 (음수 없음)
+    print(f"  BTM 고객 주입: {len(btm_ids)}명 (역송 {len(btm_strong)} + 자가소비 {len(btm_mild)})")
+
+    hour = ts.dt.hour
+    month = ts.dt.month
+
+    # ASOS 일사량 로드 — 시간별 solar_mj를 LP에 매핑
+    asos_path = Path("ASOS/asos_all.parquet")
+    if asos_path.exists():
+        asos = pd.read_parquet(asos_path, columns=["ts", "solar_mj"])
+        asos["ts_h"] = pd.to_datetime(asos["ts"]).dt.floor("h")
+        asos_solar = asos.groupby("ts_h")["solar_mj"].mean()
+        lp_hour = ts.dt.floor("h")
+        solar_mapped = lp_hour.map(asos_solar).fillna(0).values
+        print(f"  ASOS 일사량 매핑 완료 (non-zero: {(solar_mapped > 0).sum():,})")
+    else:
+        solar_mapped = np.zeros(len(out))
+        print(f"  ASOS 없음 — 시간 기반 패턴만 사용")
+
+    # 강한 BTM (역송전 발생): 일사량에 비례하여 음수 생성
+    for cid in btm_strong:
+        mask = df["customer_id"] == cid
+        midday = mask & (hour >= 10) & (hour < 15)
+        # 패널 용량 3~8kW 랜덤
+        panel_kw = np.random.uniform(3, 8)
+        # 15분 발전량 = solar_mj × 패널효율 × 용량 스케일
+        generation = solar_mapped * panel_kw * 0.15
+        original = out.loc[midday, "유효전력량계"].values
+        net = original - generation[midday.values]
+        out.loc[midday, "유효전력량계"] = net.round(1)
+
+    # 약한 BTM (자가소비만): 낮에 사용량 감소하지만 음수까지는 안 감
+    for cid in btm_mild:
+        mask = df["customer_id"] == cid
+        midday = mask & (hour >= 10) & (hour < 15)
+        panel_kw = np.random.uniform(1, 3)
+        generation = solar_mapped * panel_kw * 0.1
+        original = out.loc[midday, "유효전력량계"].values
+        net = np.maximum(original - generation[midday.values], 0.0)
+        out.loc[midday, "유효전력량계"] = net.round(1)
+
+    n_neg = (out["유효전력량계"] < 0).sum()
+    n_btm_total = len(btm_ids)
+    print(f"  역송(음수) 행: {n_neg:,} ({n_neg/len(out)*100:.1f}%)")
+    print(f"  BTM 고객 ID: 강한={list(btm_strong)[:3]}..., 약한={list(btm_mild)[:3]}...")
+
     out["본부"] = df["customer_id"].map(lambda x: cust_info[x]["본부"])
     out["지사"] = df["customer_id"].map(lambda x: cust_info[x]["지사"])
     out["계약종별"] = df["contract_type"].map(ct_map).fillna(df["contract_type"])

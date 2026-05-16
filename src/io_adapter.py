@@ -244,7 +244,7 @@ def _load_dsz_lp(cfg: SourceConfig) -> pd.DataFrame:
             lead = pd.to_numeric(d.get("p_reactive_lead", 0), errors="coerce").fillna(0)
             d[P_REACTIVE_KWH] = lag + lead
             d = d.drop(columns=["p_reactive_lag", "p_reactive_lead"], errors="ignore")
-            print(f"  [무효전력] 지상 + 진상 → p_reactive_kwh 합산")
+            print(f"  [무효전력] 지상 + 진상 → p_reactive_kwh (총무효전력, 비상계)")
 
         if TS in d.columns:
             # 시간 형식 자동 감지 + 보정
@@ -325,3 +325,68 @@ def load(cfg: SourceConfig, *, validate: bool = True) -> pd.DataFrame:
 
 def load_from_yaml(path: str | Path, **kwargs) -> pd.DataFrame:
     return load(SourceConfig.from_yaml(path), **kwargs)
+
+
+def load_smart(source_yaml: str | Path, **kwargs) -> pd.DataFrame:
+    """preprocessed parquet 우선, 없으면 YAML 소스로 폴백.
+
+    검증: meta.json status=OK 확인 + 필수 컬럼 + 행 수 > 0.
+    어디서든 실패하면 원본 CSV로 폴백.
+    """
+    import json as _json
+
+    prep_dir = Path("data/preprocessed")
+    daily_pq = prep_dir / "daily.parquet"
+    daily_csv = prep_dir / "daily.csv"
+    meta_path = prep_dir / "meta.json"
+    cust_pq = prep_dir / "customer_info.parquet"
+
+    # parquet 없으면 CSV fallback 또는 원본
+    if not daily_pq.exists():
+        if daily_csv.exists():
+            print(f"  [전처리 CSV 감지] {daily_csv} → 로드", flush=True)
+            df = pd.read_csv(daily_csv)
+            if (prep_dir / "customer_info.csv").exists():
+                cust = pd.read_csv(prep_dir / "customer_info.csv")
+                df = df.merge(cust, on="customer_id", how="left", suffixes=("", "_cust"))
+            return df
+        return load_from_yaml(source_yaml, **kwargs)
+
+    # meta.json status 확인
+    if meta_path.exists():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = _json.load(f)
+            if meta.get("status") == "FAILED":
+                print(f"  [경고] parquet 검증 실패 상태 → 원본 로드", flush=True)
+                return load_from_yaml(source_yaml, **kwargs)
+        except Exception:
+            meta = {}
+    else:
+        meta = {}
+
+    # parquet 로드
+    print(f"  [전처리 parquet 감지] {daily_pq} → 즉시 로드", flush=True)
+    try:
+        df = pd.read_parquet(daily_pq)
+    except Exception as e:
+        print(f"  [경고] parquet 로드 실패 ({e}) → 원본 로드", flush=True)
+        return load_from_yaml(source_yaml, **kwargs)
+
+    # 기본 검증: 행 수 + 필수 컬럼
+    required = {"customer_id", "date", "day_kwh"}
+    missing = required - set(df.columns)
+    if len(df) == 0 or missing:
+        print(f"  [경고] parquet 이상 (행={len(df)}, 누락={missing}) → 원본 로드", flush=True)
+        return load_from_yaml(source_yaml, **kwargs)
+
+    # 고객 정보 병합
+    if cust_pq.exists():
+        cust = pd.read_parquet(cust_pq)
+        df = df.merge(cust, on="customer_id", how="left", suffixes=("", "_cust"))
+
+    v = meta.get("validation", {})
+    print(f"    {len(df):,}행, {df['customer_id'].nunique():,}고객, "
+          f"날짜 {v.get('date_range', ['?','?'])[0]}~{v.get('date_range', ['?','?'])[1]}",
+          flush=True)
+    return df

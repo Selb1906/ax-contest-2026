@@ -41,7 +41,7 @@ def main() -> int:
 
     # 1. 데이터 로딩 + 전처리
     print("[load]", args.source)
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
     df, prep_log = preprocess(df)
     print(f"  {len(df):,} rows, {df['customer_id'].nunique()} customers")
 

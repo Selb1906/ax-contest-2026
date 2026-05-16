@@ -45,7 +45,7 @@ def main() -> int:
 
     print(f"[load] {args.source}")
     # strict=False: 음수 값이 있을 수 있으므로 스키마 검증 완화
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
     print(f"  rows={len(df):,}  customers={df['customer_id'].nunique()}")
 
     print("[detect] BTM 신호 탐지 중...")

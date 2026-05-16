@@ -91,16 +91,25 @@ def build_residual_features(
 def train_residual_model(
     res_features: pd.DataFrame,
     residuals: np.ndarray,
-    alpha: float = 1.0,
+    alpha: float | None = None,
 ) -> tuple[Ridge, StandardScaler, list[str]]:
-    """잔차 보정 Ridge 모델 학습."""
+    """잔차 보정 Ridge 모델 학습. alpha=None이면 CV로 자동 선택."""
+    from sklearn.linear_model import RidgeCV
     feature_cols = [c for c in res_features.columns if res_features[c].dtype != "category"]
     X = res_features[feature_cols].fillna(0).values
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    model = Ridge(alpha=alpha)
+    if alpha is None:
+        alphas = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0]
+        cv_model = RidgeCV(alphas=alphas, cv=5)
+        cv_model.fit(X_scaled, residuals)
+        best_alpha = float(cv_model.alpha_)
+        print(f"  [Ridge] CV 최적 alpha={best_alpha}", flush=True)
+        model = Ridge(alpha=best_alpha)
+    else:
+        model = Ridge(alpha=alpha)
     model.fit(X_scaled, residuals)
 
     return model, scaler, feature_cols

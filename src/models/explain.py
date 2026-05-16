@@ -131,9 +131,13 @@ def shap_waterfall_examples(
     else:
         alarm_idx = np.random.choice(len(X), min(n_examples, len(X)), replace=False).tolist()
 
+    import warnings
+
     for i, idx in enumerate(alarm_idx):
         row = X[feature_names].iloc[[idx]]
-        sv = explainer(row)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Glyph.*missing from font")
+            sv = explainer(row)
         shap.waterfall_plot(sv[0], show=False, max_display=12)
         p = out_dir / f"waterfall_example_{i+1}.png"
         plt.savefig(p, dpi=150, bbox_inches="tight")
@@ -160,12 +164,7 @@ def correlation_heatmap(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    for f in ["Malgun Gothic", "AppleGothic", "NanumGothic", "DejaVu Sans"]:
-        try:
-            matplotlib.rcParams["font.family"] = f
-            break
-        except Exception:
-            continue
+    matplotlib.rcParams["font.family"] = "DejaVu Sans"
     matplotlib.rcParams["axes.unicode_minus"] = False
 
     fig, ax = plt.subplots(figsize=(12, 10))

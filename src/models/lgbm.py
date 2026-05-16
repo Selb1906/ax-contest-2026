@@ -30,7 +30,6 @@ _NUMERIC_FEATURES_BASE = [
     "partial_kwh",
     "partial_rate",
     "prev_month_kwh",
-    "yoy_month_kwh",
     "ma3_kwh",
     "customer_mean_history",
 ]
@@ -51,8 +50,6 @@ _SPECIAL_DAY_FEATURES = [
     "disruption_ratio",
 ]
 _WEATHER_FEATURES = [
-    # raw temp 제거 — 여름/겨울 상관 상쇄로 피처 선택 시 오해 유발
-    # HDD/CDD가 방향 분리된 상위 호환
     "hdd_full",
     "cdd_full",
     "hdd_observed",
@@ -74,7 +71,7 @@ class FeatureSpec:
     has_ami: bool = False
     has_special_days: bool = False
     extra_numeric: list[str] = field(default_factory=list)
-    categorical: list[str] = field(default_factory=lambda: ["contract_type"])
+    categorical: list[str] = field(default_factory=list)
 
     @property
     def numeric(self) -> list[str]:
@@ -93,16 +90,73 @@ class FeatureSpec:
         return self.numeric + self.categorical
 
 
+def _load_asos_daily() -> pd.DataFrame | None:
+    """ASOS/asos_all.parquet에서 서울(108) 일별 평균 기온 로드."""
+    from pathlib import Path as _Path
+    for p in [_Path("ASOS/asos_all.parquet"), _Path("data/ASOS/asos_all.parquet")]:
+        if p.exists():
+            _asos = pd.read_parquet(p, columns=["station_id", "ts", "temp_c"])
+            _asos["ts"] = pd.to_datetime(_asos["ts"])
+            _asos = _asos[_asos["station_id"] == 108]
+            daily = _asos.groupby(_asos["ts"].dt.date)["temp_c"].mean().reset_index()
+            daily.columns = ["date", "temp_c"]
+            daily["date"] = pd.to_datetime(daily["date"])
+            return daily
+    return None
+
+
 def _weather_aggs(
-    df: pd.DataFrame, horizon_tbl: pd.DataFrame
+    df: pd.DataFrame, horizon_tbl: pd.DataFrame,
+    remainder_temp_override: pd.DataFrame | None = None,
 ) -> pd.DataFrame | None:
-    """고객·월·horizon 별 기상 집계 (full/observed/remainder)."""
-    if "temp_c" not in df.columns:
+    """고객·월·horizon 별 기상 집계 (full/observed/remainder).
+
+    ASOS에서 직접 일별 기온을 로드. observed는 항상 ASOS 실측.
+    remainder_temp_override가 주어지면 잔여 기간 기온을 해당 데이터로 대체 (TMY 등).
+    override 형식: DataFrame with columns [date, temp_c] (월별이면 [month, temp_c]).
+    """
+    asos_daily = _load_asos_daily()
+    if asos_daily is None:
+        print(f"  [weather_aggs] ASOS 파일 없음 → 스킵", flush=True)
         return None
-    d = df[[CUSTOMER_ID, TS, "temp_c"]].copy()
-    d["date"] = pd.to_datetime(d[TS]).dt.normalize()
+
+    try:
+        custs = df[CUSTOMER_ID].unique()
+        dates = pd.to_datetime(df[TS]).dt.normalize().unique()
+        cust_dates = pd.DataFrame([(c, dt) for c in custs for dt in dates],
+                                  columns=[CUSTOMER_ID, "date"])
+        d = cust_dates.merge(asos_daily, on="date", how="left")
+        print(f"  [weather_aggs] ASOS 직접 로드: {len(asos_daily)}일, {len(custs)}고객", flush=True)
+    except Exception as e:
+        print(f"  [weather_aggs] ASOS 로드 실패: {e}", flush=True)
+        return None
+
     d["year_month"] = d["date"].dt.to_period("M")
     d["day_of_month"] = d["date"].dt.day
+
+    na_rate = d["temp_c"].isna().mean()
+    print(f"  [weather_aggs] 기온 결측률: {na_rate:.1%}", flush=True)
+    if na_rate > 0.5:
+        print(f"  [weather_aggs] 결측 50% 초과 → 스킵", flush=True)
+        return None
+
+    # remainder override 준비 (TMY 등)
+    d_rem = None
+    if remainder_temp_override is not None:
+        if "month" in remainder_temp_override.columns and "date" not in remainder_temp_override.columns:
+            # 월별 TMY → 고객×일 확장 (같은 월의 모든 날에 동일 기온)
+            d_rem = d[[CUSTOMER_ID, "date", "year_month", "day_of_month"]].copy()
+            d_rem["_month"] = d_rem["date"].dt.month
+            tmy_lookup = remainder_temp_override.groupby("month")["temp_c"].mean().to_dict()
+            d_rem["temp_c"] = d_rem["_month"].map(tmy_lookup)
+            d_rem = d_rem.drop(columns=["_month"])
+            print(f"  [weather_aggs] remainder를 TMY로 대체 (월별)", flush=True)
+        elif "date" in remainder_temp_override.columns:
+            # 일별 TMY
+            d_rem = cust_dates.merge(remainder_temp_override[["date", "temp_c"]], on="date", how="left")
+            d_rem["year_month"] = d_rem["date"].dt.to_period("M")
+            d_rem["day_of_month"] = d_rem["date"].dt.day
+            print(f"  [weather_aggs] remainder를 TMY로 대체 (일별)", flush=True)
 
     # 월 전체 기온 평균
     full = d.groupby([CUSTOMER_ID, "year_month"], observed=True)["temp_c"].mean().reset_index(
@@ -114,14 +168,17 @@ def _weather_aggs(
 
     rows = []
     for h in horizon_tbl["horizon_days"].unique():
+        # observed: 항상 ASOS 실측
         obs = (
             d[d["day_of_month"] <= h]
             .groupby([CUSTOMER_ID, "year_month"], observed=True)["temp_c"]
             .mean()
             .reset_index(name="temp_observed_mean")
         )
+        # remainder: override 있으면 TMY, 없으면 ASOS
+        rem_source = d_rem if d_rem is not None else d
         rem = (
-            d[d["day_of_month"] > h]
+            rem_source[rem_source["day_of_month"] > h]
             .groupby([CUSTOMER_ID, "year_month"], observed=True)["temp_c"]
             .mean()
             .reset_index(name="temp_remainder_mean")
@@ -136,7 +193,10 @@ def _weather_aggs(
         merged["cdd_remainder"] = cdd_r
         rows.append(merged)
     obs_rem = pd.concat(rows, ignore_index=True)
-    return obs_rem.merge(full, on=[CUSTOMER_ID, "year_month"], how="left")
+    result = obs_rem.merge(full, on=[CUSTOMER_ID, "year_month"], how="left")
+    rem_src = "TMY" if d_rem is not None else "ASOS"
+    print(f"  [weather_aggs] 생성 완료: {len(result)}행, remainder={rem_src}, hdd_remainder 비null {result['hdd_remainder'].notna().sum()}", flush=True)
+    return result
 
 
 def _ami_features(df: pd.DataFrame, horizon_tbl: pd.DataFrame) -> pd.DataFrame | None:
@@ -261,7 +321,7 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
     horizon = build_horizon_table(daily, horizons=(10, 20))
 
     # 래그 피처
-    mlook = monthly.set_index([CUSTOMER_ID, "year_month"])["monthly_kwh"]
+    mlook = monthly.drop_duplicates([CUSTOMER_ID, "year_month"]).set_index([CUSTOMER_ID, "year_month"])["monthly_kwh"]
     mean_hist = (
         monthly.groupby(CUSTOMER_ID, observed=True)["monthly_kwh"]
         .expanding()
@@ -272,7 +332,7 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
     monthly_with_hist = monthly.copy()
     monthly_with_hist["customer_mean_history"] = mean_hist.values
 
-    hist_lookup = monthly_with_hist.set_index([CUSTOMER_ID, "year_month"])[
+    hist_lookup = monthly_with_hist.drop_duplicates([CUSTOMER_ID, "year_month"]).set_index([CUSTOMER_ID, "year_month"])[
         "customer_mean_history"
     ]
 
@@ -289,7 +349,7 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
         for c, ym in zip(horizon[CUSTOMER_ID], horizon["year_month"])
     ]
     horizon["ma3_kwh"] = [
-        np.nanmean([mlook.get((c, ym - k), np.nan) for k in (1, 2, 3)])
+        float(np.nanmean([float(mlook.get((c, ym - k), np.nan)) for k in (1, 2, 3)]))
         for c, ym in zip(horizon[CUSTOMER_ID], horizon["year_month"])
     ]
     horizon["customer_mean_history"] = [
@@ -313,12 +373,13 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
         )
         # 전월 대비 역률 변화 (냉방 시작 감지)
         if "observed_power_factor" in horizon.columns:
-            pf_lookup = horizon.set_index(
+            _pf_df = horizon.drop_duplicates([CUSTOMER_ID, "year_month", "horizon_days"])
+            pf_lookup = _pf_df.set_index(
                 [CUSTOMER_ID, "year_month", "horizon_days"]
-            )["observed_power_factor"]
+            )["observed_power_factor"].to_dict()
             horizon["pf_vs_prev_month"] = [
-                (pf_lookup.get((c, ym, h), np.nan) or np.nan)
-                - (pf_lookup.get((c, ym - 1, h), np.nan) or np.nan)
+                float(pf_lookup.get((c, ym, h), np.nan))
+                - float(pf_lookup.get((c, ym - 1, h), np.nan))
                 for c, ym, h in zip(
                     horizon[CUSTOMER_ID],
                     horizon["year_month"],
@@ -337,7 +398,7 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
     # 추가 컬럼 자동 감지 (세대수, 계약전력, 지역코드 등)
     extra_num = []
     cust_extra = df[[CUSTOMER_ID]].drop_duplicates()
-    for col in ["n_households", "contract_power_kw", "is_btm", "btm_score"]:
+    for col in ["n_households", "contract_power_kw"]:
         if col in df.columns:
             lookup = df.groupby(CUSTOMER_ID)[col].first().reset_index()
             horizon = horizon.merge(lookup, on=CUSTOMER_ID, how="left")
@@ -349,11 +410,9 @@ def build_features(df: pd.DataFrame) -> tuple[pd.DataFrame, FeatureSpec]:
         extra_num.append("kwh_per_household")
 
     # 카테고리 피처 자동 감지
-    extra_cat = ["contract_type"]
+    extra_cat = []
     _CAT_CANDIDATES = [
         "region_code",      # 본부
-        "region_sub",       # 지사
-        "supply_method",    # 공급방식 (저압/고압)
         "usage_purpose",    # 전기사용용도
         "industry_code",    # 산업분류
     ]
@@ -402,19 +461,25 @@ def train(
     if test_periods is not None:
         test_mask &= features["year_month"].isin(test_periods)
 
+    # partial_linear 베이스라인: 잔차 학습 타겟
+    pl_pred_all = (
+        features["partial_kwh"] / features["days_observed"].clip(lower=1) * features["days_in_month"]
+    )
+    y_residual = features["full_month_kwh"] - pl_pred_all
+
     X_tr = features.loc[train_mask, spec.all]
-    y_tr = features.loc[train_mask, "full_month_kwh"]
+    y_tr = y_residual.loc[train_mask]
     X_te = features.loc[test_mask, spec.all]
-    y_te = features.loc[test_mask, "full_month_kwh"]
+    y_te = y_residual.loc[test_mask]
 
     print(
         f"[lgbm] train={len(X_tr):,}  test={len(X_te):,}  "
-        f"train_end={train_end}  features={len(spec.all)}"
+        f"train_end={train_end}  features={len(spec.all)}  (잔차 학습)"
     )
 
     default_params = {
         "objective": "regression",
-        "metric": "mape",
+        "metric": "mae",
         "learning_rate": 0.05,
         "num_leaves": 31,
         "min_data_in_leaf": 40,
@@ -433,6 +498,7 @@ def train(
         reference=dtr,
         categorical_feature=spec.categorical,
     )
+    evals_result: dict = {}
     booster = lgb.train(
         default_params,
         dtr,
@@ -442,12 +508,32 @@ def train(
         callbacks=[
             lgb.early_stopping(early_stopping_rounds, verbose=False),
             lgb.log_evaluation(period=50),
+            lgb.record_evaluation(evals_result),
         ],
     )
 
-    # 테스트 예측 DataFrame
+    # 학습 곡선 로그 저장 (generate_figures fig06용)
+    if evals_result:
+        try:
+            import json as _json
+            log_dir = Path("weights/dsz_lgbm")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_dir / "training_log.json", "w") as f:
+                _json.dump(evals_result, f)
+        except Exception:
+            pass
+
+    # 테스트 예측: partial_linear + 잔차 보정 + 클리핑
     test_preds = features.loc[test_mask, [CUSTOMER_ID, "year_month", "horizon_days"]].copy()
-    test_preds["pred_monthly_kwh"] = booster.predict(X_te, num_iteration=booster.best_iteration)
+    residual_pred = booster.predict(X_te, num_iteration=booster.best_iteration)
+    pl_base = pl_pred_all.loc[test_mask].values
+    raw_pred = pl_base + residual_pred
+    partial = features.loc[test_mask, "partial_kwh"].values
+    test_preds["pred_monthly_kwh"] = np.maximum(raw_pred, partial)
+    n_clipped = int((raw_pred < partial).sum())
+    if n_clipped > 0:
+        print(f"  [클리핑] pred < partial_kwh: {n_clipped}건 보정", flush=True)
+    print(f"  [잔차 학습] 잔차 평균={residual_pred.mean():.1f}, std={residual_pred.std():.1f}", flush=True)
     return booster, test_preds
 
 
@@ -465,6 +551,7 @@ def save(
         "feature_columns": spec.all,
         "numeric_columns": spec.numeric,
         "categorical_columns": spec.categorical,
+        "extra_numeric": spec.extra_numeric,
         "has_weather": spec.has_weather,
         "has_ami": spec.has_ami,
         "has_special_days": spec.has_special_days,
@@ -485,6 +572,7 @@ def load(weights_dir: str | Path) -> tuple[lgb.Booster, FeatureSpec]:
         has_weather=bool(meta.get("has_weather", False)),
         has_ami=bool(meta.get("has_ami", False)),
         has_special_days=bool(meta.get("has_special_days", False)),
+        extra_numeric=meta.get("extra_numeric", []),
         categorical=meta.get("categorical_columns", ["contract_type"]),
     )
     return booster, spec

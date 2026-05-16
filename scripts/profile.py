@@ -28,7 +28,7 @@ def main() -> int:
     args = p.parse_args()
 
     print(f"[load] source={args.source}")
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
     print(
         f"[load] rows={len(df):,}  customers={df['customer_id'].nunique()}  "
         f"cols={list(df.columns)}"

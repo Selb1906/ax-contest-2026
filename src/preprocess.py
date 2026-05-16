@@ -116,8 +116,9 @@ def remove_outliers(
             q1 = group[P_ACTIVE_KWH].quantile(0.25)
             q3 = group[P_ACTIVE_KWH].quantile(0.75)
             iqr = q3 - q1
-            lower = q1 - iqr_factor * iqr
             upper = q3 + iqr_factor * iqr
+            lower = q1 - iqr_factor * iqr
+            lower = min(lower, 0)
             return group[(group[P_ACTIVE_KWH] >= lower) & (group[P_ACTIVE_KWH] <= upper)]
         df = df.groupby(CUSTOMER_ID, observed=True, group_keys=False).apply(_iqr_filter)
 

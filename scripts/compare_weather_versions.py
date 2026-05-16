@@ -102,7 +102,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print("[load] LP data...")
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
 
     daily = daily_by_customer(df)
     monthly = monthly_by_customer(daily)

@@ -49,7 +49,7 @@ def main() -> int:
     train_end = pd.Period(args.train_end, freq="M") if args.train_end else None
 
     print("[load]")
-    df = io_adapter.load_from_yaml(args.source, validate=False)
+    df = io_adapter.load_smart(args.source, validate=False)
     df, _ = preprocess(df)
 
     print("[btm detect]")

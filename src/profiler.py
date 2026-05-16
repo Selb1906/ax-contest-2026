@@ -892,12 +892,7 @@ def stat_correlation_matrix(df: pd.DataFrame, out_dir: Path, min_n: int) -> Arti
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        for f in ["Malgun Gothic", "AppleGothic", "NanumGothic", "DejaVu Sans"]:
-            try:
-                matplotlib.rcParams["font.family"] = f
-                break
-            except Exception:
-                continue
+        matplotlib.rcParams["font.family"] = "DejaVu Sans"
         matplotlib.rcParams["axes.unicode_minus"] = False
 
         fig, ax = plt.subplots(figsize=(10, 8))
